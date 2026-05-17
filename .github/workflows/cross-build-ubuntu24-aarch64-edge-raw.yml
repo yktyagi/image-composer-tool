@@ -1,4 +1,4 @@
-name: Cross Build Ubuntu24 AArch64 Edge Raw
+name: Cross Build Ubuntu24 AArch64 Edge Raw  
 on:
   workflow_dispatch:
     inputs:
