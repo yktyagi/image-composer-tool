@@ -233,7 +233,7 @@ func (p *eLxr) installHostDependency() error {
 		"veritysetup":       "cryptsetup",       // For the veritysetup command
 		"sbsign":            "sbsigntool",       // For the UKI image creation
 		"dpkg-scanpackages": "dpkg-dev",         // For DEB repository metadata creation
-                "bootctl":           "systemd-boot-efi", // For bootctl on Ubuntu hosts
+		"bootctl":           "systemd-boot-efi", // For bootctl on Ubuntu hosts
 		"arch-test":         "arch-test",        // Required by mmdebstrap for foreign-architecture bootstrap
 		"qemu-user-static":  "qemu-user-static", // For cross-architecture binary execution support
 	}
