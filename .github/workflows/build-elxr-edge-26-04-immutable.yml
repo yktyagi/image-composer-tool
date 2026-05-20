@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 jobs:
-  build-elxr-edge-26.04-immutable:
+  build-elxr-edge-26-04-immutable:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

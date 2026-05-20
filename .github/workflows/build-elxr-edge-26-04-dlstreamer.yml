@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 jobs:
-  build-elxr-edge-26.04-dlstreamer:
+  build-elxr-edge-26-04-dlstreamer:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
