@@ -751,3 +751,70 @@ func TestPerformanceWithLargePackageSet(t *testing.T) {
 		t.Errorf("Resolution took too long: %v", elapsed)
 	}
 }
+
+// TestExactVersionConstraintReplacement verifies that the resolver replaces
+// an already-resolved package when a later dependency requires an exact (=)
+// version that differs from the resolved one.  This covers the scenario where
+// e.g. systemd from noble-updates requires libsystemd-shared (= X.Y) but the
+// resolver had already picked an older libsystemd-shared from the base repo.
+func TestExactVersionConstraintReplacement(t *testing.T) {
+	// libsystemd-shared has two versions across repos:
+	// base repo: 255.4-1ubuntu8
+	// updates repo: 255.4-1ubuntu8.14
+	// systemd from updates requires libsystemd-shared (= 255.4-1ubuntu8.14)
+	all := []ospackage.PackageInfo{
+		{
+			Name:    "libsystemd-shared",
+			Version: "255.4-1ubuntu8",
+			URL:     "http://archive.ubuntu.com/ubuntu/pool/main/s/systemd/libsystemd-shared_255.4-1ubuntu8_amd64.deb",
+		},
+		{
+			Name:    "libsystemd-shared",
+			Version: "255.4-1ubuntu8.14",
+			URL:     "http://archive.ubuntu.com/ubuntu/pool/main/s/systemd/libsystemd-shared_255.4-1ubuntu8.14_amd64.deb",
+		},
+		{
+			Name:        "systemd",
+			Version:     "255.4-1ubuntu8.14",
+			URL:         "http://archive.ubuntu.com/ubuntu/pool/main/s/systemd/systemd_255.4-1ubuntu8.14_amd64.deb",
+			Requires:    []string{"libsystemd-shared"},
+			RequiresVer: []string{"libsystemd-shared (= 255.4-1ubuntu8.14)"},
+		},
+		{
+			Name:        "systemd-timesyncd",
+			Version:     "255.4-1ubuntu8.14",
+			URL:         "http://archive.ubuntu.com/ubuntu/pool/main/s/systemd/systemd-timesyncd_255.4-1ubuntu8.14_amd64.deb",
+			Requires:    []string{"systemd", "libsystemd-shared"},
+			RequiresVer: []string{"systemd (= 255.4-1ubuntu8.14)", "libsystemd-shared (= 255.4-1ubuntu8.14)"},
+		},
+	}
+
+	// Request systemd-timesyncd which ultimately needs the .14 versions.
+	req := []ospackage.PackageInfo{
+		{Name: "systemd-timesyncd", Version: "255.4-1ubuntu8.14"},
+	}
+
+	result, err := debutils.ResolveDependencies(req, all)
+	if err != nil {
+		t.Fatalf("ResolveDependencies failed: %v", err)
+	}
+
+	// Verify all packages resolved to the .14 version
+	resolved := make(map[string]string)
+	for _, pkg := range result {
+		resolved[pkg.Name] = pkg.Version
+	}
+
+	for _, expect := range []struct{ name, version string }{
+		{"systemd-timesyncd", "255.4-1ubuntu8.14"},
+		{"systemd", "255.4-1ubuntu8.14"},
+		{"libsystemd-shared", "255.4-1ubuntu8.14"},
+	} {
+		got, ok := resolved[expect.name]
+		if !ok {
+			t.Errorf("expected %s in result but not found", expect.name)
+		} else if got != expect.version {
+			t.Errorf("expected %s version %s, got %s", expect.name, expect.version, got)
+		}
+	}
+}

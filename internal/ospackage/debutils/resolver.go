@@ -776,21 +776,10 @@ func ResolveDependencies(requested []ospackage.PackageInfo, all []ospackage.Pack
 					}
 
 					if !constraintsSatisfied {
-						// Check if replacement is allowed - if current constraint has exact version (=)
-						// and resolved package has different version, this is a conflict
-						hasExactVersionConstraint := false
-						for _, constraint := range versionConstraints {
-							if constraint.Op == "=" {
-								hasExactVersionConstraint = true
-								break
-							}
-						}
-
-						// Before throwing error, check if there's a higher priority candidate available
-						// But only allow replacement if we don't have an exact version conflict
+						// Before throwing error, check if there's a candidate that satisfies the constraint
 						candidates := findAllCandidates(depName, all)
 
-						if len(candidates) > 0 && !hasExactVersionConstraint {
+						if len(candidates) > 0 {
 							// Find candidates that satisfy the version constraint
 							var satisfyingCandidates []ospackage.PackageInfo
 							for _, candidate := range candidates {
