@@ -55,20 +55,20 @@ run_package_fuzz_test() {
     fi
 }
 
-# Function to run a single fuzz test (for main.go)
+# Function to run a single fuzz test (for main command package)
 run_main_fuzz_test() {
     local test_name=$1
     local test_start=$(date +%s)
     local log_file="/tmp/fuzz_${test_name}_${RANDOM}.log"
     echo -e "${YELLOW}Testing ${test_name} function...${NC}"
     
-    if go test -run='^$' -fuzz="${test_name}" -fuzztime="${FUZZ_TIME}" ./cmd/os-image-composer 2>&1 | tee "${log_file}"; then
+    if go test -run='^$' -fuzz="${test_name}" -fuzztime="${FUZZ_TIME}" ./cmd/image-composer-tool 2>&1 | tee "${log_file}"; then
         local test_end=$(date +%s)
         local duration=$((test_end - test_start))
         local log_content=$(cat "${log_file}" | base64 -w 0)
         echo -e "${GREEN}✅ ${test_name} PASSED!${NC}"
-        TEST_RESULTS+=("PASS|cmd/os-image-composer|${test_name}|${duration}s")
-        TEST_LOGS+=("cmd/os-image-composer|${test_name}|${log_content}")
+        TEST_RESULTS+=("PASS|cmd/image-composer-tool|${test_name}|${duration}s")
+        TEST_LOGS+=("cmd/image-composer-tool|${test_name}|${log_content}")
         rm -f "${log_file}"
         return 0
     else
@@ -76,8 +76,8 @@ run_main_fuzz_test() {
         local duration=$((test_end - test_start))
         local log_content=$(cat "${log_file}" | base64 -w 0)
         echo -e "${RED}❌ ${test_name} FAILED!${NC}"
-        TEST_RESULTS+=("FAIL|cmd/os-image-composer|${test_name}|${duration}s")
-        TEST_LOGS+=("cmd/os-image-composer|${test_name}|${log_content}")
+        TEST_RESULTS+=("FAIL|cmd/image-composer-tool|${test_name}|${duration}s")
+        TEST_LOGS+=("cmd/image-composer-tool|${test_name}|${log_content}")
         rm -f "${log_file}"
         return 1
     fi
@@ -301,7 +301,7 @@ else
     echo "3. Use go test -run=FuzzFunctionName to reproduce the failure"
     echo ""
     echo "Examples:"
-    echo "  go test -run=FuzzCreateRootCommand -v ./cmd/os-image-composer"
+    echo "  go test -run=FuzzCreateRootCommand -v ./cmd/image-composer-tool"
     echo "  go test -run=FuzzValidateAgainstSchema -v ./internal/config/validate"
     echo ""
     echo -e "${BLUE}📊 Detailed failure analysis available in: ${REPORT_FILE}${NC}"
