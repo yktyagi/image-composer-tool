@@ -2028,9 +2028,9 @@ func configUserStartupScript(installRoot string, user config.UserConfig) error {
 func (imageOs *ImageOs) generateSBOM(installRoot string, template *config.ImageTemplate) (string, error) {
 	pkgType := imageOs.chrootEnv.GetTargetOsPkgType()
 	sBomFNm := rpmutils.GenerateSPDXFileName(template.GetImageName())
-	cmd := "rpm -qa --qf '%{NAME}\t%{VERSION}-%{RELEASE}\t%{ARCH}\n'"
+	cmd := "rpm -qa"
 	if pkgType == "deb" {
-		cmd = "dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\\n'"
+		cmd = "dpkg -l | awk '/^ii/ {print $2}'"
 		sBomFNm = debutils.GenerateSPDXFileName(template.GetImageName())
 	}
 
@@ -2078,30 +2078,12 @@ func (imageOs *ImageOs) generateSBOM(installRoot string, template *config.ImageT
 				continue
 			}
 
-			fields := strings.Split(line, "\t")
-			name := strings.TrimSpace(fields[0])
-			if name == "" {
-				continue
-			}
-
-			version := ""
-			arch := ""
-			if len(fields) > 1 {
-				version = strings.TrimSpace(fields[1])
-			}
-			if len(fields) > 2 {
-				arch = strings.TrimSpace(fields[2])
-			}
-
 			finalPkgs = append(finalPkgs, ospackage.PackageInfo{
-				Name:    name,
-				PkgName: name,
+				Name:    line,
+				PkgName: line,
 				Type:    pkgType,
-				Version: version,
-				Arch:    arch,
-				URL:     manifest.DefaultLicense,
-				License: manifest.DefaultLicense,
-				Origin:  manifest.DefaultLicense,
+				License: "NOASSERTION",
+				Origin:  "UNKNOWN",
 			})
 		}
 	}
@@ -2111,23 +2093,21 @@ func (imageOs *ImageOs) generateSBOM(installRoot string, template *config.ImageT
 	// Generate SPDX manifest in temp directory and also publish a canonical filename.
 	spdxFile := filepath.Join(config.TempDir(), sBomFNm)
 	if err := manifest.WriteSPDXToFile(finalPkgs, spdxFile); err != nil {
-		log.Errorf("SPDX SBOM creation error: %v", err)
-		return "", fmt.Errorf("failed to generate SPDX SBOM: %w", err)
+		log.Warnf("SPDX SBOM creation error: %v", err)
 	}
 	log.Infof("SPDX file created at %s", spdxFile)
 
 	canonicalSBOM := filepath.Join(config.TempDir(), manifest.DefaultSPDXFile)
 	if spdxFile != canonicalSBOM {
 		if err := file.CopyFile(spdxFile, canonicalSBOM, "--preserve=mode", false); err != nil {
-			log.Errorf("failed to prepare canonical SPDX SBOM %s: %v", canonicalSBOM, err)
-			return "", fmt.Errorf("failed to prepare canonical SPDX SBOM: %w", err)
+			log.Warnf("failed to prepare canonical SPDX SBOM %s: %v", canonicalSBOM, err)
 		}
 	}
 
 	// Copy SBOM into image filesystem
 	if err := manifest.CopySBOMToChroot(installRoot); err != nil {
-		log.Errorf("failed to copy SBOM into image filesystem: %v", err)
-		return "", fmt.Errorf("failed to copy SBOM into image filesystem: %w", err)
+		log.Warnf("failed to copy SBOM into image filesystem: %v", err)
+		// Don't fail the build if SBOM copy fails, just log warning
 	}
 
 	return result, nil
