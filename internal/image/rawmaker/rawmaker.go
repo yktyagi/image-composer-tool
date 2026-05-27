@@ -137,7 +137,7 @@ func (rawMaker *RawMaker) BuildRawImage() error {
 	// Setup signal handler for graceful cleanup on Ctrl+C
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	
+
 	// Setup cleanup for loop device (always needed)
 	defer func() {
 		signal.Stop(sigChan)

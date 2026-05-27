@@ -74,7 +74,7 @@ func (loopDev *LoopDev) LoopSetupDelete(loopDevPath string) error {
 			log.Infof("Loop device %s already detached or doesn't exist (likely cleaned by system)", loopDevPath)
 			return nil
 		}
-		
+
 		log.Warnf("Standard detach failed for %s, attempting force detach: %v", loopDevPath, err)
 		// Try detach again after a brief retry. NOTE: do NOT use `losetup -D` here
 		// — that flag detaches EVERY loop device on the host and ignores the path
