@@ -428,6 +428,17 @@ func TestClearDebPackageCache(t *testing.T) {
 			wantLeft: []string{"notes.txt"},
 		},
 		{
+			name: "clears deb files in nested subdirectories",
+			setup: func(dir string) {
+				_ = os.WriteFile(filepath.Join(dir, "bash_1.0_amd64.deb"), []byte("x"), 0644)
+				chrootenv := filepath.Join(dir, "chrootenv")
+				_ = os.MkdirAll(chrootenv, 0755)
+				_ = os.WriteFile(filepath.Join(chrootenv, "libsystemd0_1.0_amd64.deb"), []byte("x"), 0644)
+				_ = os.WriteFile(filepath.Join(chrootenv, "Packages.gz"), []byte("x"), 0644)
+			},
+			wantLeft: []string{filepath.Join("chrootenv", "Packages.gz")},
+		},
+		{
 			name:  "empty cache dir is a no-op",
 			setup: func(dir string) {},
 		},
@@ -441,7 +452,7 @@ func TestClearDebPackageCache(t *testing.T) {
 				t.Fatalf("clearDebPackageCache() unexpected error: %v", err)
 			}
 
-			debs, _ := filepath.Glob(filepath.Join(dir, "*.deb"))
+			debs := globDebsRecursive(t, dir)
 			if len(debs) != 0 {
 				t.Errorf("expected no .deb files after clear, got %v", debs)
 			}
@@ -453,6 +464,25 @@ func TestClearDebPackageCache(t *testing.T) {
 			}
 		})
 	}
+}
+
+// globDebsRecursive returns every .deb file under root, including nested subdirs.
+func globDebsRecursive(t *testing.T, root string) []string {
+	t.Helper()
+	var debs []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && filepath.Ext(d.Name()) == ".deb" {
+			debs = append(debs, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", root, err)
+	}
+	return debs
 }
 
 func TestClearDebMetadataCache(t *testing.T) {
