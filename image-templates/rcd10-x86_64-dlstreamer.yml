@@ -87,6 +87,9 @@ systemConfig:
     - intel-dlstreamer-2025.2.0
     - openvino-2025.3.0
     - linux-firmware-i915
+    - podman
+    - podman-docker
+    # - tdnf
     # - tdnf
 
   configurations:
