@@ -8,7 +8,7 @@ from Docker's official public repo.
 ## Command Used
 
 ```bash
-python3 customize-template.py ubuntu24-x86_64-minimal-raw.yml \
+python3 .github/skills/image-composer-custom/scripts/customize-template.py ubuntu24-x86_64-minimal-raw.yml \
     --name ubuntu24-x86_64-docker-test \
     --desc "Ubuntu 24.04 minimal with Docker CE from Docker's official repo" \
     --add-packages "docker-ce,docker-ce-cli,containerd.io,docker-buildx-plugin,docker-compose-plugin" \
