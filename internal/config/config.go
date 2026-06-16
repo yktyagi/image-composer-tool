@@ -94,6 +94,7 @@ type ProviderRepoConfigs struct {
 
 // ImageTemplate represents the YAML image template structure (unchanged)
 type ImageTemplate struct {
+	Extends             string              `yaml:"extends,omitempty"`
 	Image               ImageInfo           `yaml:"image"`
 	Target              TargetInfo          `yaml:"target"`
 	Disk                DiskConfig          `yaml:"disk,omitempty"`
