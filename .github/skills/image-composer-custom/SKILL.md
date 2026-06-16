@@ -94,7 +94,7 @@ mechanism:
 | What you want | Repo URL | Codename | Component |
 |---------------|----------|----------|-----------|
 | Docker CE on Ubuntu | `https://download.docker.com/linux/ubuntu` | `noble` | `stable` |
-| Docker CE on Debian | `https://download.docker.com/linux/debian` | `bookworm` | `stable` |
+| Docker CE on Debian | `https://download.docker.com/linux/debian` | `trixie` | `stable` |
 | ROS2 on Ubuntu | `http://packages.ros.org/ros2/ubuntu` | `noble` | `main` |
 | EPEL on RCD10/Rocky | `https://dl.fedoraproject.org/pub/epel/10/Everything/x86_64` | *(label)* | *(label)* |
 | NodeSource Node.js | `https://deb.nodesource.com/node_22.x` | `noble` | `main` |
