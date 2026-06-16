@@ -5,7 +5,7 @@
 A custom template was created with a deliberately wrong package name:
 
 ```bash
-python3 customize-template.py robotics-demo-ubuntu24-x86_64.yml \
+python3 .github/skills/image-composer-custom/scripts/customize-template.py robotics-demo-ubuntu24-x86_64.yml \
   --name ros2-error-test \
   --add-packages "this-package-does-not-exist-at-all,nano"
 ```
