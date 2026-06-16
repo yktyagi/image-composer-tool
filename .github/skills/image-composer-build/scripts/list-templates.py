@@ -10,9 +10,7 @@ Usage:
     python list-templates.py desktop     # show desktop/ISO variants
 """
 
-import os
 import sys
-import glob
 import yaml
 from pathlib import Path
 
