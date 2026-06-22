@@ -1243,7 +1243,12 @@ func SystemBlockDevices() (systemDevices []SystemBlockDevice, err error) {
 
 func ResolveInstallDiskPath(diskConfig config.DiskConfig) (string, error) {
 	if diskConfig.Path != "" {
+		log.Infof("Disk selection bypassed by explicit path: %s", diskConfig.Path)
 		return diskConfig.Path, nil
+	}
+
+	if _, settleErr := shell.ExecCmd("udevadm settle --timeout=10", true, shell.HostPath, nil); settleErr != nil {
+		log.Warnf("udevadm settle failed before disk selection (continuing): %v", settleErr)
 	}
 
 	devices, err := SystemBlockDevices()
@@ -1267,6 +1272,18 @@ func ResolveInstallDiskPath(diskConfig config.DiskConfig) (string, error) {
 	requireEmpty := true
 	if diskConfig.SelectionPolicy.RequireEmpty != nil {
 		requireEmpty = *diskConfig.SelectionPolicy.RequireEmpty
+	}
+
+	log.Infof("Disk selection policy resolved: strategy=%s, excludeRemovable=%t, requireEmpty=%t", strategy, excludeRemovable, requireEmpty)
+	if len(devices) == 0 {
+		log.Infof("No block devices discovered before policy evaluation")
+	} else {
+		log.Infof("Discovered block devices before policy evaluation:")
+		for _, dev := range devices {
+			log.Infof("  candidate=%s size=%d transport=%s removable=%t external=%t rotational=%t model=%q serial=%q",
+				dev.DevicePath, dev.RawDiskSize, strings.TrimSpace(dev.Transport), dev.IsRemovable, dev.IsExternal, dev.IsRotational,
+				strings.TrimSpace(dev.Model), strings.TrimSpace(dev.Serial))
+		}
 	}
 
 	requiredDiskBytes, err := requiredInstallDiskBytes(diskConfig.Partitions)
