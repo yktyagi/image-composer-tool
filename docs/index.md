@@ -59,7 +59,7 @@ For build options (Earthly, Debian package) and prerequisite details, see the
 | [Secure Boot](./tutorial/configure-secure-boot.md)                           | Configuring secure boot for images       |
 | [Configure Users](./tutorial/configure-image-user.md)                        | Adding users to images                   |
 | [Custom Build Actions](./tutorial/configure-additional-actions-for-build.md) | Commands during image compose (chroot)   |
-| [Custom Initrd Script](./tutorial/configure-custom-initrd-script.md)       | Run a script in early boot (initramfs)   |
+| [Custom Initrd Script](./tutorial/configure-custom-initrd-script.md)       | Debian 13 GRUB initramfs-tools initrd hook |
 | [Multiple Repos](./tutorial/configure-multiple-package-repositories.md)      | Using multiple package repositories      |
 
 ## Get Help
