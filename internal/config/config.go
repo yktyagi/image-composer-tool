@@ -92,7 +92,7 @@ type ProviderRepoConfigs struct {
 	Repositories []ProviderRepoConfig `yaml:"repositories"`
 }
 
-// ImageTemplate represents the YAML image template structure (unchanged)
+// ImageTemplate represents the YAML image template structure
 type ImageTemplate struct {
 	Extends             string              `yaml:"extends,omitempty"`
 	Image               ImageInfo           `yaml:"image"`

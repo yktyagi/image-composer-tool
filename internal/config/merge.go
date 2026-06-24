@@ -84,6 +84,7 @@ func MergeConfigurations(userTemplate, defaultTemplate *ImageTemplate) (*ImageTe
 	// If no default template, use user template as-is
 	if defaultTemplate == nil {
 		log.Warn("Default template is nil, using user template as-is")
+		userTemplate.Extends = ""
 		return userTemplate, nil
 	}
 
