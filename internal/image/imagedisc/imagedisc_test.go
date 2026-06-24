@@ -903,6 +903,8 @@ Disklabel type: dos`
 				{Pattern: "sudo cat /sys/block/sda/queue/hw_sector_size", Output: "512", Error: nil},
 				{Pattern: "sudo cat /sys/block/sda/queue/physical_block_size", Output: "4096", Error: nil},
 				{Pattern: "sudo sgdisk.*", Output: "", Error: fmt.Errorf("sgdisk failed")},
+				{Pattern: "sudo sync", Output: "", Error: nil},
+				{Pattern: "sudo partx -u /dev/sda", Output: "", Error: nil},
 			},
 			expectError: true,
 			errorMsg:    "failed to create partition",
