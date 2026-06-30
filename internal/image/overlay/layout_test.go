@@ -179,7 +179,7 @@ func TestDetectPartitionTable(t *testing.T) {
 
 	t.Run("gpt via lsblk", func(t *testing.T) {
 		shell.Default = shell.NewMockExecutor([]shell.MockCommand{
-			{Pattern: "lsblk -dno PTTYPE /dev/loop0", Output: "gpt\n"},
+			{Pattern: "lsblk -dno PTTYPE '/dev/loop0'", Output: "gpt\n"},
 		})
 		got, err := detectPartitionTable("/dev/loop0")
 		if err != nil || got != partitionTableGPT {
@@ -189,7 +189,7 @@ func TestDetectPartitionTable(t *testing.T) {
 
 	t.Run("dos via lsblk", func(t *testing.T) {
 		shell.Default = shell.NewMockExecutor([]shell.MockCommand{
-			{Pattern: "lsblk -dno PTTYPE /dev/loop1", Output: "dos\n"},
+			{Pattern: "lsblk -dno PTTYPE '/dev/loop1'", Output: "dos\n"},
 		})
 		got, err := detectPartitionTable("/dev/loop1")
 		if err != nil || got != partitionTableDOS {
@@ -199,8 +199,8 @@ func TestDetectPartitionTable(t *testing.T) {
 
 	t.Run("falls back to blkid", func(t *testing.T) {
 		shell.Default = shell.NewMockExecutor([]shell.MockCommand{
-			{Pattern: "lsblk -dno PTTYPE /dev/loop2", Output: "", Error: nil},
-			{Pattern: "blkid -p -s PTTYPE -o value /dev/loop2", Output: "gpt\n"},
+			{Pattern: "lsblk -dno PTTYPE '/dev/loop2'", Output: "", Error: nil},
+			{Pattern: "blkid -p -s PTTYPE -o value '/dev/loop2'", Output: "gpt\n"},
 		})
 		got, err := detectPartitionTable("/dev/loop2")
 		if err != nil || got != partitionTableGPT {
@@ -210,8 +210,8 @@ func TestDetectPartitionTable(t *testing.T) {
 
 	t.Run("rejects no partition table", func(t *testing.T) {
 		shell.Default = shell.NewMockExecutor([]shell.MockCommand{
-			{Pattern: "lsblk -dno PTTYPE /dev/loop3", Output: "\n"},
-			{Pattern: "blkid -p -s PTTYPE -o value /dev/loop3", Output: ""},
+			{Pattern: "lsblk -dno PTTYPE '/dev/loop3'", Output: "\n"},
+			{Pattern: "blkid -p -s PTTYPE -o value '/dev/loop3'", Output: ""},
 		})
 		if _, err := detectPartitionTable("/dev/loop3"); err == nil {
 			t.Fatal("expected rejection for missing table")
@@ -220,7 +220,7 @@ func TestDetectPartitionTable(t *testing.T) {
 
 	t.Run("rejects unsupported table type", func(t *testing.T) {
 		shell.Default = shell.NewMockExecutor([]shell.MockCommand{
-			{Pattern: "lsblk -dno PTTYPE /dev/loop4", Output: "atari\n"},
+			{Pattern: "lsblk -dno PTTYPE '/dev/loop4'", Output: "atari\n"},
 		})
 		if _, err := detectPartitionTable("/dev/loop4"); err == nil {
 			t.Fatal("expected rejection for unsupported table type")
@@ -242,7 +242,7 @@ func TestProbePartitions(t *testing.T) {
 	}`
 
 	shell.Default = shell.NewMockExecutor([]shell.MockCommand{
-		{Pattern: "lsblk -b --json .* /dev/loop0", Output: lsblkJSON},
+		{Pattern: "lsblk -b --json .* '/dev/loop0'", Output: lsblkJSON},
 	})
 	parts, err := probePartitions("/dev/loop0")
 	if err != nil {
@@ -268,7 +268,7 @@ func TestProbePartitions_StringSize(t *testing.T) {
 	  {"name":"loop0p1","path":"/dev/loop0p1","fstype":"ext4","size":"8589934592","type":"part"}
 	]}]}`
 	shell.Default = shell.NewMockExecutor([]shell.MockCommand{
-		{Pattern: "lsblk -b --json .* /dev/loop0", Output: lsblkJSON},
+		{Pattern: "lsblk -b --json .* '/dev/loop0'", Output: lsblkJSON},
 	})
 	parts, err := probePartitions("/dev/loop0")
 	if err != nil {

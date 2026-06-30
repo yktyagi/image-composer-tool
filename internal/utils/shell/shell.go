@@ -58,6 +58,7 @@ var commandMap = map[string][]string{
 	"debugfs":            {"/usr/sbin/debugfs", "/usr/bin/debugfs"},
 	"dnf":                {"/usr/bin/dnf"},
 	"dpkg":               {"/usr/bin/dpkg"},
+	"dpkg-deb":           {"/usr/bin/dpkg-deb"},
 	"dpkg-divert":        {"/usr/bin/dpkg-divert"},
 	"dpkg-scanpackages":  {"/usr/bin/dpkg-scanpackages"},
 	"echo":               {"/bin/echo", "/usr/bin/echo"},
@@ -75,6 +76,7 @@ var commandMap = map[string][]string{
 	"groupadd":           {"/usr/sbin/groupadd"},
 	"gunzip":             {"/usr/bin/gunzip"},
 	"grep":               {"/usr/bin/grep", "/bin/grep"},
+	"growpart":           {"/usr/bin/growpart"},
 	"grub-mkconfig":      {"/usr/sbin/grub-mkconfig"},
 	"grub2-mkconfig":     {"/usr/sbin/grub2-mkconfig"},
 	"gzip":               {"/usr/bin/gzip"},
@@ -91,15 +93,19 @@ var commandMap = map[string][]string{
 	"mmdebstrap":         {"/usr/bin/mmdebstrap"},
 	"mkdir":              {"/bin/mkdir"},
 	"mkfs":               {"/usr/sbin/mkfs"},
+	"mkfs.ext4":          {"/usr/sbin/mkfs.ext4", "/sbin/mkfs.ext4"},
+	"mkfs.vfat":          {"/usr/sbin/mkfs.vfat", "/sbin/mkfs.vfat"},
 	"mkswap":             {"/usr/sbin/mkswap"},
 	"mktemp":             {"/usr/bin/mktemp"},
 	"mount":              {"/usr/bin/mount"},
 	"opkg":               {"/usr/bin/opkg"},
 	"parted":             {"/usr/sbin/parted"},
+	"partprobe":          {"/usr/sbin/partprobe", "/sbin/partprobe"},
 	"partx":              {"/usr/bin/partx", "/sbin/partx"},
 	"pvcreate":           {"/usr/sbin/pvcreate"},
 	"qemu-img":           {"/usr/bin/qemu-img"},
 	"qemu-system-x86_64": {"/usr/bin/qemu-system-x86_64"},
+	"resize2fs":          {"/usr/sbin/resize2fs", "/sbin/resize2fs"},
 	"rm":                 {"/bin/rm"},
 	"rpm":                {"/usr/bin/rpm"},
 	"run":                {"/usr/bin/run"},
@@ -131,6 +137,7 @@ var commandMap = map[string][]string{
 	"vgcreate":           {"/usr/sbin/vgcreate"},
 	"wget":               {"/usr/bin/wget"},
 	"wipefs":             {"/usr/sbin/wipefs"},
+	"xfs_growfs":         {"/usr/sbin/xfs_growfs", "/sbin/xfs_growfs"},
 	"xorriso":            {"/usr/bin/xorriso"},
 	"xz":                 {"/usr/bin/xz"},
 	"yum":                {"/usr/bin/yum"},
@@ -242,8 +249,9 @@ func IsCommandExist(cmd string, chrootPath string) (bool, error) {
 // wrapping is used deliberately (not strconv.Quote / double quotes): inside
 // double quotes bash still expands $(...), backticks and $var, whereas nothing
 // is special inside single quotes. An embedded single quote is emitted as the
-// standard '\” sequence (close-quote, escaped-quote, reopen-quote), so the
-// result is safe for arbitrary input including quotes themselves.
+// standard close-quote / backslash-escaped-quote / reopen-quote sequence, i.e.
+// the four characters ' \ ' ' , so the result is safe for arbitrary input
+// including quotes themselves.
 func QuoteArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
