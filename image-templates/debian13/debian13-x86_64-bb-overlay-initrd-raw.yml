@@ -111,6 +111,7 @@ disk:
   size: 8GiB
   artifacts:
     - type: qcow2
+    - type: raw
 
 # -----------------------------------------------------------------------------
 # Overlay policy — additive-and-upgrade, plus the ONE removal this base requires.
@@ -165,6 +166,10 @@ systemConfig:
   #   - name: user
   #     password: "<SHA512-CRYPT HASH>"   # e.g. `mkpasswd -m sha512crypt`; NOT plaintext
   #     groups: ["sudo"]
+  users:
+    - name: user
+      password: user1234
+      groups: ["sudo"]
   # ---------------------------------------------------------------------------
   # Base packages overlaid onto the Debian 13 cloud image. The overlay is
   # additive-and-upgrade (see overlayPolicy above): each package and its
