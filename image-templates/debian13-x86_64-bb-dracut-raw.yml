@@ -178,6 +178,17 @@ systemConfig:
     - gnome-terminal
     - gnome-software
 
+  # inject user 'uccadmin/111111' — this image is expected to have it
+  # pre-provisioned. Password hash is for '111111', generated with
+  # `openssl passwd -6 111111` (NOT stored in plaintext). hash_algo is
+  # required here — without it, createUser treats `password` as a literal
+  # plaintext value instead of a pre-hashed one.
+  users:
+    - name: uccadmin
+      password: "$6$kCsNoG0d2ZNR3T.D$9TQGs96VM8IMCnZFCW49fwBrjv4cRQdvmUtcZS24uE8NaSXBAGbqk1lW1UY0IHZfSW7egSmi1Oo.r8XOFZBgO0"
+      hash_algo: sha512
+      groups: ["sudo", "adm"]
+
   additionalFiles:
     - local: additionalfiles/debian13-bb-dracut/modules.d/91hello/module-setup.sh
       final: /usr/lib/dracut/modules.d/91hello/module-setup.sh
