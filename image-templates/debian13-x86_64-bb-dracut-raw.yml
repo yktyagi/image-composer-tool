@@ -196,6 +196,14 @@ systemConfig:
       final: /usr/lib/dracut/modules.d/91hello/hello.sh
     - local: additionalfiles/debian13-bb-dracut/modules.d/91hello/initqueue-sample.sh
       final: /usr/lib/dracut/modules.d/91hello/initqueue-sample.sh
+    # tcdisk: early-boot dracut module that mounts a disk found via tc-client
+    # (a small helper binary, staged as-is below).
+    - local: additionalfiles/debian13-bb-dracut/modules.d/92tcdisk/module-setup.sh
+      final: /usr/lib/dracut/modules.d/92tcdisk/module-setup.sh
+    - local: additionalfiles/debian13-bb-dracut/modules.d/92tcdisk/tc-client
+      final: /usr/lib/dracut/modules.d/92tcdisk/tc-client
+    - local: additionalfiles/debian13-bb-dracut/modules.d/92tcdisk/tcdisk.sh
+      final: /usr/lib/dracut/modules.d/92tcdisk/tcdisk.sh
     # X11, not Wayland — Debian 13's gnome-session ships Wayland-only;
     # gnome-shell's X11 backend still works, it's just missing the xsessions
     # launcher, supplied below. The dconf override below also disables a
@@ -247,6 +255,8 @@ systemConfig:
     - cmd: 'cd /opt/c4v/c4v && bash scripts/install-debian.sh'
     - cmd: 'mkdir -p /etc/dracut.conf.d && echo ''add_dracutmodules+=" hello "'' > /etc/dracut.conf.d/91hello.conf'
     - cmd: "chmod 755 /usr/lib/dracut/modules.d/91hello/module-setup.sh /usr/lib/dracut/modules.d/91hello/hello.sh /usr/lib/dracut/modules.d/91hello/initqueue-sample.sh"
+    - cmd: 'echo ''add_dracutmodules+=" tcdisk "'' > /etc/dracut.conf.d/92tcdisk.conf'
+    - cmd: "chmod 755 /usr/lib/dracut/modules.d/92tcdisk/module-setup.sh /usr/lib/dracut/modules.d/92tcdisk/tc-client /usr/lib/dracut/modules.d/92tcdisk/tcdisk.sh"
     - cmd: "printf 'Package: systemd-boot systemd-boot-efi\\nPin: release *\\nPin-Priority: -1\\n' > /etc/apt/preferences.d/no-systemd-boot"
     - cmd: "dpkg --purge --force-all systemd-boot systemd-boot-efi 2>/dev/null || true"
     # Graphical login: gdm3 is WantedBy=graphical.target, so the default target
