@@ -1,0 +1,505 @@
+# Sample overlay-mode template: layer packages onto an existing Ubuntu 24.04 RAW
+# image instead of building one from scratch.
+#
+# Replace baseline.source.path below with the path to your own baseline RAW
+# image (or use baseline.source.url for an https-hosted image). The placeholder
+# path is intentionally not a real file; the build will not run until you point
+# it at a baseline you have.
+#
+# ---------------------------------------------------------------------------
+# Customization log (why this template diverges from the stock sample). Mirrors
+# installer.sh so the overlay build produces the same package/kernel set:
+#   1. baseline.source.path  -> local ubuntu-desktop-24.04.4-custom.img (raw).
+#   2. packageRepositories    -> Intel internal PPA from installer.sh PPAUpdate;
+#      allowPackages lists every package meant to come from that PPA (the
+#      resolver only indexes PPA packages named here — everything else falls
+#      back to the Ubuntu archive).
+#   3. systemConfig.packages  -> installer.sh's full list: Ubuntu-archive
+#      packages plus the PPA packages (repeated by name, versions come from the
+#      dated PPA snapshot).
+#   4. systemConfig.kernel + overlayPolicy.kernelCmdline/grubDefault -> the
+#      6.18-intel kernel from installer.sh KernelUpdate, made the default boot
+#      target with its i915 cmdline.
+#   5. overlayPolicy.packageOperation: additive-and-upgrade -> see note below;
+#      needed so baseline packages can be upgraded to the versions the PPA and
+#      Ubuntu security point-releases pin.
+#
+# Build-debugging fixes (each cleared one failing build; see the inline comment
+# at the named package/field for the full reasoning). The overlay resolver is
+# NOT full apt — several fixes work around specific resolver behaviours:
+#   #3 packageOperation additive-only -> additive-and-upgrade: cleared 71
+#      preflight violations (baseline point-release/PPA version bumps were
+#      forbidden under additive-only).  [overlayPolicy, line ~64]
+#   #4 allowPackages += mutter-common: libmutter-14-0 pins a PPA mutter-common
+#      newer than the archive; it must be allow-listed to be indexed. [~99]
+#   #5 allowPackages += xserver-xorg-core: keep the whole X server set on the
+#      PPA so xserver-xorg-core does not upgrade to archive .6 and demand a
+#      newer xserver-common than the PPA provides. [~197]
+#   #5 packages += vim-tiny: request it so it UPGRADES (vs. gets removed) to
+#      satisfy vim-runtime's "Breaks: vim-tiny (<< 7.18)". [~249]
+#   #7 packages: dropped virtual "libssl3", added real libssl3t64 PINNED to
+#      3.0.13-0ubuntu3.11: the Provides path ignored versions and pulled the
+#      oldest libssl3t64, breaking libssl-dev's exact "=" dep. [~309]
+#   #8 packages/allowPackages: removed va-driver-all metapackage: its
+#      "intel-media-va-driver | ...-non-free" OR-dep made the resolver pull the
+#      FREE archive driver, which conflicts at dpkg unpack with the non-free
+#      PPA driver we install. [~133 / ~404]
+# Each individual change also carries an inline comment explaining the reason.
+# ---------------------------------------------------------------------------
+
+# AI-searchable metadata for template discovery
+metadata:
+  description: Overlay an existing Ubuntu 24.04 RAW image, adding packages without rebuilding from scratch
+  use_cases:
+    - Add packages to a pre-built Ubuntu base image
+    - Incremental/overlay image customization
+    - Fast iteration on an existing golden image
+  keywords:
+    - overlay
+    - baseline
+    - additive
+    - ubuntu
+    - raw
+    - incremental
+
+image:
+  name: ubuntu-overlay
+  version: "24.04"
+
+target:
+  os: ubuntu
+  dist: ubuntu24
+  arch: x86_64
+  imageType: raw
+
+# Overlay mode: layer packages onto an existing baseline RAW image instead of
+# building from scratch. The source image is copied into the build workspace
+# first and is never modified in place.
+baseline:
+  mode: overlay
+  source:
+    # Replace with a real baseline RAW image path on your build host, or use
+    # `url: https://...` to fetch one over TLS.
+    path: /path/to/ubuntu-desktop-24.04.4-custom.img
+    format: raw
+
+# additive-and-upgrade: packages may be added AND already-installed baseline
+# packages may be upgraded to a satisfying version. Required here because the
+# Intel PPA packages (gstreamer/ffmpeg 1.26, wayland 1.23) and Ubuntu security
+# point-releases pin dependency versions newer than the baseline; additive-only
+# forbids upgrading those baseline packages, so the pins can never be met.
+# Downgrades and removals remain blocked.
+overlayPolicy:
+  packageOperation: additive-and-upgrade
+  conflictPolicy: fail
+  # Kernel update (installer.sh KernelUpdate, default non-rt 6.18-intel path).
+  # The linux-image/linux-headers packages are added below; these two keys make
+  # the overlay-added Intel kernel the default boot target and apply its cmdline.
+  kernelCmdline: "i915.enable_guc=3 i915.max_vfs=7 i915.force_probe=* udmabuf.list_limit=8192 console=tty0 console=ttyS0,115200n8"
+  grubDefault: "Advanced options for Ubuntu>Ubuntu, with Linux 6.18-intel"
+
+# Intel internal PPA repository (aligned with installer.sh PPAUpdate). Packages
+# listed under allowPackages are pulled from this repo; the high priority makes
+# the internal PPA authoritative when a package also exists in the base repo.
+packageRepositories:
+  - codename: "noble"
+    url: "https://af01p-png.devtools.intel.com/artifactory/hspe-edge-png-local/ubuntu/noble/noble/20260716-0009/"
+    pkey: "https://af01p-png.devtools.intel.com/artifactory/hspe-edge-png-local/ubuntu/keys/adl-hirsute-public.gpg"
+    component: "noble main non-free multimedia internal"
+    priority: 2000
+    # Packages resolved from the internal PPA (repeated in systemConfig.packages).
+    allowPackages:
+      - iproute2
+      - xdp-tools
+      - libxdp-dev
+      - libxdp1
+      - mutter-common-bin
+      # mutter-common: allow-listed so the PPA's 46.2-...~noble2 is indexed.
+      # libmutter-14-0 (from the PPA) Depends: mutter-common (>= 46.2-...~noble2);
+      # without this the resolver only saw the older Ubuntu-archive mutter-common
+      # and the version constraint could not be met (build #4 missing-dep).
+      - mutter-common
+      - libmutter-14-0
+      - gir1.2-mutter-14
+      - libigdgmm-dev
+      - libigdgmm12
+      - libmfx-gen1.2
+      - libva-dev
+      - libva-drm2
+      - libva-glx2
+      - libva-wayland2
+      - libva-x11-2
+      - libva2
+      - linux-firmware
+      - mesa-vulkan-drivers
+      - libvpl-dev
+      - libmfx-gen-dev
+      - onevpl-tools
+      - qemu-block-extra
+      - qemu-guest-agent
+      - qemu-system
+      - qemu-system-arm
+      - qemu-system-common
+      - qemu-system-data
+      - qemu-system-gui
+      - qemu-system-mips
+      - qemu-system-misc
+      - qemu-system-ppc
+      - qemu-system-s390x
+      - qemu-system-sparc
+      - qemu-system-x86
+      - qemu-user
+      - qemu-user-binfmt
+      - qemu-utils
+      - qemu-system-modules-opengl
+      - va-driver-all
+      # va-driver-all removed: it is a metapackage whose OR-dependency
+      # "intel-media-va-driver | intel-media-va-driver-non-free" made the resolver
+      # pull the FREE archive driver (intel-media-va-driver 24.1.0) as the first
+      # alternative. That free driver "Conflicts: intel-media-va-driver-non-free"
+      # (26.2.3, which we request), so dpkg aborted at unpack (build #8). Under
+      # real apt the OR is satisfied by the already-selected non-free driver and
+      # the free one is never installed, but this resolver takes the first literal
+      # alternative. Dropping the metapackage keeps the non-free driver clean.
+      # NOTE: this also drops the legacy i965-va-driver that va-driver-all pulled.
+      - weston
+      - linuxptp
+      - libvpl-tools
+      - spice-client-gtk
+      - rpc-go
+      - lms
+      - intel-media-va-driver-non-free
+      - gir1.2-gst-plugins-bad-1.0
+      - gir1.2-gst-plugins-base-1.0
+      - gir1.2-gstreamer-1.0
+      - gir1.2-gst-rtsp-server-1.0
+      - gstreamer1.0-alsa
+      - gstreamer1.0-gl
+      - gstreamer1.0-gtk3
+      - gstreamer1.0-opencv
+      - gstreamer1.0-plugins-bad
+      - gstreamer1.0-plugins-bad-apps
+      - gstreamer1.0-plugins-base
+      - gstreamer1.0-plugins-base-apps
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-plugins-ugly
+      - gstreamer1.0-pulseaudio
+      - gstreamer1.0-qt5
+      - gstreamer1.0-rtsp
+      - gstreamer1.0-tools
+      - gstreamer1.0-x
+      - libgstrtspserver-1.0-dev
+      - libgstrtspserver-1.0-0
+      - libgstreamer-gl1.0-0
+      - libgstreamer-opencv1.0-0
+      - libgstreamer-plugins-bad1.0-0
+      - libgstreamer-plugins-bad1.0-dev
+      - libgstreamer-plugins-base1.0-0
+      - libgstreamer-plugins-base1.0-dev
+      - libgstreamer1.0-0
+      - libgstreamer1.0-dev
+      - vainfo
+      - ffmpeg
+      - xpu-smi
+      - intel-ocloc
+      - libze-intel-gpu1
+      - intel-metrics-discovery
+      - intel-metrics-library
+      - intel-gsc
+      - level-zero
+      - intel-igc-core-2
+      - intel-igc-opencl-2
+      - intel-opencl-icd
+      - xserver-common
+      # xserver-xorg-core: allow-listed so it is governed by the PPA (2:21.1.12-
+      # 1ppa1~noble3) instead of upgrading to the Ubuntu archive's 1ubuntu1.6.
+      # The archive .6 core Depends: xserver-common (>= ...1ubuntu1.6), but
+      # xserver-common is pinned to the PPA (~noble3, which sorts LOWER than .6),
+      # so the dep was unsatisfiable (build #5). Keeping the whole X server set on
+      # the PPA — as installer.sh's pin-1001 does — makes the versions coherent.
+      - xserver-xorg-core
+      - xnest
+      - xserver-xorg-dev
+      - xvfb
+      # Intel kernel (installer.sh KernelUpdate, default 6.18-intel)
+      - linux-headers-6.18-intel
+      - linux-image-6.18-intel
+      - libavcodec62
+      - libavdevice62
+      - libavfilter11
+      - libavformat62
+      - libavutil60
+      - libswresample6
+      - libswscale9
+      # Transitive deps for which the internal PPA ships a NEWER version than the
+      # Ubuntu archive. These MUST be allow-listed: the resolver only indexes PPA
+      # packages named here, so otherwise the archive's older version is the only
+      # candidate and the PPA gstreamer/ffmpeg/spice version constraints fail.
+      - libvpl2
+      # libwayland-* is a version-coupled set (strict inter-dep versions); the
+      # full set must come from the PPA (1.23.0), not the archive (1.22.0).
+      - libwayland-client0
+      - libwayland-cursor0
+      - libwayland-egl1
+      - libwayland-server0
+      - libwayland-bin
+      - libwayland-dev
+      - libwayland-doc
+      - libwayland-egl-backend-dev
+      - libspice-client-glib-2.0-8
+      - libspice-client-gtk-3.0-5
+      - spice-client-glib-usb-acl-helper
+      - libweston-10-0
+      - metee
+
+
+systemConfig:
+  name: overlay
+  description: Ubuntu 24.04 baseline with additional packages overlaid
+
+  # Additive overlay packages. These (and their transitive dependencies not
+  # already present in the baseline) are resolved, downloaded, and installed
+  # into the baseline. The bootloader and kernel are left untouched.
+  packages:
+    # --- Ubuntu archive packages ---
+    - vim
+    # vim-tiny: requested so it UPGRADES to 2:9.1.0016-1ubuntu7.18 rather than
+    # being removed. `vim` pulls vim-runtime 7.18, which declares
+    # "Breaks: vim-tiny (<< ...7.18)"; the baseline vim-tiny (7.9) tripped that,
+    # and the resolver's only fix was to remove vim-tiny — a removal that
+    # additive-and-upgrade blocks (build #5 conflict). Upgrading it satisfies the
+    # Breaks without any removal.
+    - vim-tiny
+    - ocl-icd-libopencl1
+    - curl
+    - openssh-server
+    - net-tools
+    - libdrm-amdgpu1
+    - libdrm-common
+    - libdrm-dev
+    - libdrm-intel1
+    - libdrm-nouveau2
+    - libdrm-radeon1
+    - libdrm-tests
+    - libdrm2
+    - libtpms-dev
+    - libtpms0
+    - libwayland-bin
+    - libwayland-client0
+    - libwayland-cursor0
+    - libwayland-dev
+    - libwayland-doc
+    - libwayland-egl-backend-dev
+    - libwayland-egl1
+    - libwayland-server0
+    - mesa-utils
+    - ovmf
+    - ovmf-ia32
+    - xserver-xorg-core
+    - libvirt0
+    - libvirt-clients
+    - libvirt-daemon
+    - libvirt-daemon-config-network
+    - libvirt-daemon-config-nwfilter
+    - libvirt-daemon-driver-lxc
+    - libvirt-daemon-driver-qemu
+    - libvirt-daemon-driver-storage-gluster
+    - libvirt-daemon-driver-storage-iscsi-direct
+    - libvirt-daemon-driver-storage-rbd
+    - libvirt-daemon-driver-storage-zfs
+    - libvirt-daemon-driver-vbox
+    - libvirt-daemon-driver-xen
+    - libvirt-daemon-system
+    - libvirt-daemon-system-systemd
+    - libvirt-dev
+    - libvirt-doc
+    - libvirt-login-shell
+    - libvirt-sanlock
+    - libvirt-wireshark
+    - libnss-libvirt
+    - swtpm
+    - swtpm-tools
+    - bmap-tools
+    - adb
+    - autoconf
+    - automake
+    - libtool
+    - cmake
+    - g++
+    - gcc
+    - git
+    - intel-gpu-tools
+    # NOTE: "libssl3" is intentionally NOT requested. On noble it is not a real
+    # package — it is a virtual name Provided by libssl3t64. Requesting it made
+    # the resolver take the Provides path, which does not compare versions and so
+    # dragged in the OLDEST libssl3t64 (base-noble 3.0.13-0ubuntu3); that older
+    # copy then won the libssl3t64 slot and left libssl-dev's "= ...3.11"
+    # dependency unsatisfiable (builds #5-#7). We request the real package
+    # (libssl3t64) directly, pinned below.
+    - libssl-dev
+    # libssl3t64: VERSION-PINNED (name_version syntax) to the security build
+    # 3.0.13-0ubuntu3.11 so it matches libssl-dev, which strictly
+    # "Depends: libssl3t64 (= 3.0.13-0ubuntu3.11)". .11 is newer than the
+    # installed baseline .7, so it is upgrade-eligible and satisfies the exact
+    # "=" dependency. (libssl3t64 is the noble t64-ABI package; libssl3 is only
+    # its virtual/transitional alias — see the note above on why we dropped it.)
+    - libssl3t64_3.0.13-0ubuntu3.11
+    - make
+    - mosquitto
+    - mosquitto-clients
+    - build-essential
+    - apt-transport-https
+    - default-jre
+    - docker-compose
+    - git-lfs
+    - gnuplot
+    - lbzip2
+    - libglew-dev
+    - libglm-dev
+    - libsdl2-dev
+    - mc
+    - openssl
+    - pciutils
+    - python3-pandas
+    - python3-pip
+    - python3-seaborn
+    - terminator
+    - wmctrl
+    - wayland-protocols
+    - gdbserver
+    - iperf3
+    - msr-tools
+    - powertop
+    - lsscsi
+    - tpm2-tools
+    - tpm2-abrmd
+    - binutils
+    - cifs-utils
+    - i2c-tools
+    - xdotool
+    - gnupg
+    - lsb-release
+    - socat
+    - virt-viewer
+    - util-linux-extra
+    - dbus-x11
+    - sg3-utils
+    - rpm
+    # --- Intel internal PPA packages (see packageRepositories.allowPackages) ---
+    - iproute2
+    - xdp-tools
+    - libxdp-dev
+    - libxdp1
+    - mutter-common-bin
+    - libmutter-14-0
+    - gir1.2-mutter-14
+    - libigdgmm-dev
+    - libigdgmm12
+    - libmfx-gen1.2
+    - libva-dev
+    - libva-drm2
+    - libva-glx2
+    - libva-wayland2
+    - libva-x11-2
+    - libva2
+    - linux-firmware
+    - mesa-vulkan-drivers
+    - libvpl-dev
+    - libmfx-gen-dev
+    - onevpl-tools
+    - qemu-block-extra
+    - qemu-guest-agent
+    - qemu-system
+    - qemu-system-arm
+    - qemu-system-common
+    - qemu-system-data
+    - qemu-system-gui
+    - qemu-system-mips
+    - qemu-system-misc
+    - qemu-system-ppc
+    - qemu-system-s390x
+    - qemu-system-sparc
+    - qemu-system-x86
+    - qemu-user
+    - qemu-user-binfmt
+    - qemu-utils
+    - qemu-system-modules-opengl
+    #- va-driver-all
+    # va-driver-all removed — see the matching note in allowPackages above. Its
+    # OR-dep pulled the free intel-media-va-driver 24.1.0, which conflicts with
+    # the non-free 26.2.3 we install; dpkg aborted at unpack (build #8).
+    - weston
+    - linuxptp
+    - libvpl-tools
+    - spice-client-gtk
+    - rpc-go
+    - lms
+    - intel-media-va-driver-non-free
+    - gir1.2-gst-plugins-bad-1.0
+    - gir1.2-gst-plugins-base-1.0
+    - gir1.2-gstreamer-1.0
+    - gir1.2-gst-rtsp-server-1.0
+    - gstreamer1.0-alsa
+    - gstreamer1.0-gl
+    - gstreamer1.0-gtk3
+    - gstreamer1.0-opencv
+    - gstreamer1.0-plugins-bad
+    - gstreamer1.0-plugins-bad-apps
+    - gstreamer1.0-plugins-base
+    - gstreamer1.0-plugins-base-apps
+    - gstreamer1.0-plugins-good
+    - gstreamer1.0-plugins-ugly
+    - gstreamer1.0-pulseaudio
+    - gstreamer1.0-qt5
+    - gstreamer1.0-rtsp
+    - gstreamer1.0-tools
+    - gstreamer1.0-x
+    - libgstrtspserver-1.0-dev
+    - libgstrtspserver-1.0-0
+    - libgstreamer-gl1.0-0
+    - libgstreamer-opencv1.0-0
+    - libgstreamer-plugins-bad1.0-0
+    - libgstreamer-plugins-bad1.0-dev
+    - libgstreamer-plugins-base1.0-0
+    - libgstreamer-plugins-base1.0-dev
+    - libgstreamer1.0-0
+    - libgstreamer1.0-dev
+    - vainfo
+    - ffmpeg
+    - xpu-smi
+    - intel-ocloc
+    - libze-intel-gpu1
+    - intel-metrics-discovery
+    - intel-metrics-library
+    - intel-gsc
+    - level-zero
+    - intel-igc-core-2
+    - intel-igc-opencl-2
+    - intel-opencl-icd
+    - xserver-common
+    - xnest
+    - xserver-xorg-dev
+    - xvfb
+    # --- Intel kernel update (installer.sh KernelUpdate, default 6.18-intel) ---
+    # Installer pins version 260713t060441z-r2; overlay resolves by name and takes
+    # the version served by the dated internal PPA snapshot in packageRepositories.
+    - linux-headers-6.18-intel
+    - linux-image-6.18-intel
+    - libavcodec62
+    - libavdevice62
+    - libavfilter11
+    - libavformat62
+    - libavutil60
+    - libswresample6
+    - libswscale9
+
+  # Kernel from installer.sh KernelUpdate (default, non-rt path). Version and
+  # cmdline mirror the installer's 6.18-intel branch; packages carry the pinned
+  # 260713t060441z-r2 build.
+  kernel:
+    version: "260713t060441z-r2"
+    cmdline: "i915.enable_guc=3 i915.max_vfs=7 i915.force_probe=* udmabuf.list_limit=8192 console=tty0 console=ttyS0,115200n8"
+    enableExtraModules: "intel_vpu uas"
+    packages:
+      - linux-image-6.18-intel_260713t060441z-r2
+      - linux-headers-6.18-intel_260713t060441z-r2
