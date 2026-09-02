@@ -17,9 +17,9 @@
 #   3. systemConfig.packages  -> installer.sh's full list: Ubuntu-archive
 #      packages plus the PPA packages (repeated by name, versions come from the
 #      dated PPA snapshot).
-#   4. systemConfig.kernel + overlayPolicy.kernelCmdline/grubDefault -> the
-#      6.18-intel kernel from installer.sh KernelUpdate, made the default boot
-#      target with its i915 cmdline.
+#   4. overlayPolicy.replaceKernel + kernelCmdline/grubDefault -> swap the
+#      baseline kernel for the 6.18-intel kernel from installer.sh KernelUpdate,
+#      making it the sole kernel with its i915 cmdline as the default boot target.
 #   5. overlayPolicy.packageOperation: additive-and-upgrade -> see note below;
 #      needed so baseline packages can be upgraded to the versions the PPA and
 #      Ubuntu security point-releases pin.
@@ -35,16 +35,42 @@
 #   #5 allowPackages += xserver-xorg-core: keep the whole X server set on the
 #      PPA so xserver-xorg-core does not upgrade to archive .6 and demand a
 #      newer xserver-common than the PPA provides. [~197]
-#   #5 packages += vim-tiny: request it so it UPGRADES (vs. gets removed) to
-#      satisfy vim-runtime's "Breaks: vim-tiny (<< 7.18)". [~249]
-#   #7 packages: dropped virtual "libssl3", added real libssl3t64 PINNED to
-#      3.0.13-0ubuntu3.11: the Provides path ignored versions and pulled the
-#      oldest libssl3t64, breaking libssl-dev's exact "=" dep. [~309]
-#   #8 packages/allowPackages: removed va-driver-all metapackage: its
-#      "intel-media-va-driver | ...-non-free" OR-dep made the resolver pull the
-#      FREE archive driver, which conflicts at dpkg unpack with the non-free
-#      PPA driver we install. [~133 / ~404]
-# Each individual change also carries an inline comment explaining the reason.
+#   #5 vim-tiny is NO LONGER listed: vim pulls vim-runtime, which declares
+#      "Breaks: vim-tiny (<< ...)". The overlay resolver now auto-upgrades a
+#      baseline package that a to-install package Breaks (instead of only being
+#      able to remove it), so vim-tiny upgrades to satisfy the Breaks without
+#      being listed here.
+#   #7 packages: request real libssl3t64 (unpinned) instead of the virtual
+#      "libssl3": the Provides path used to ignore versions and pull the oldest
+#      libssl3t64, breaking libssl-dev's exact "=" dep. The resolver now ranks
+#      same-named virtual providers newest-first, so no version pin is needed. [~309]
+#   #8 va-driver-all is RESTORED: its "intel-media-va-driver | ...-non-free"
+#      OR-dep once pulled the FREE archive driver (the first literal alternative),
+#      which conflicts at dpkg unpack with the non-free PPA driver we install. The
+#      resolver now prefers an already-selected alternative, so the already-
+#      requested non-free driver satisfies the OR and the metapackage installs
+#      cleanly. [~155 / ~423]
+#   #9 packages += libatomic1, libgcc-s1, libstdc++6, libgomp1, libegl-mesa0,
+#      libgl1-mesa-dri, libglx-mesa0, libnss-systemd, libpam-systemd,
+#      systemd-oomd, systemd-resolved, systemd-sysv, systemd-timesyncd,
+#      openssh-client, openssh-sftp-server: same lockstep issue as the
+#      udev/systemd fix below, one level further down the dependency graph.
+#      Removing the baseline kernel packages for the replaceKernel swap made
+#      the resolver audit the whole baseline tree, which surfaced that these
+#      packages exact-pin ("=") a version of gcc-14-base / libgbm1 /
+#      mesa-libgallium / systemd / libsystemd-shared / openssh-client older
+#      than the point release already installed in the baseline. Left
+#      unlisted, additive-and-upgrade upgrades the base libs but leaves these
+#      dependents at their old, now-unsatisfiable version, so the resolver
+#      reported them as orphaned/broken and refused to proceed (kernel
+#      replacement only self-authorizes removing the kernel family, not
+#      collateral packages). Requesting them explicitly lets the resolver pick
+#      the matching newer build of each. [~296]
+# Builds #5/#7/#8 above were resolver bugs that have since been fixed in
+# image-composer-tool, so the workarounds they required were dropped from this
+# template (vim-tiny no longer listed, libssl3t64 unpinned, va-driver-all
+# restored). Those simplifications assume a tool version that includes the fixes.
+# Each remaining change also carries an inline comment explaining the reason.
 # ---------------------------------------------------------------------------
 
 # AI-searchable metadata for template discovery
@@ -92,9 +118,17 @@ baseline:
 overlayPolicy:
   packageOperation: additive-and-upgrade
   conflictPolicy: fail
-  # Kernel update (installer.sh KernelUpdate, default non-rt 6.18-intel path).
-  # The linux-image/linux-headers packages are added below; these two keys make
-  # the overlay-added Intel kernel the default boot target and apply its cmdline.
+  # Kernel swap (installer.sh KernelUpdate, default non-rt 6.18-intel path):
+  # install linux-image-6.18-intel (resolved from the Intel PPA below) and remove
+  # the baseline kernel family, so the emitted image ships ONLY the Intel kernel.
+  # GRUB is regenerated so the boot menu drops the removed kernel's entry.
+  replaceKernel:
+    package: linux-image-6.18-intel
+    additionalPackages:
+      - linux-headers-6.18-intel
+    enableExtraModules: "intel_vpu uas"
+    # Descriptive only — never used to resolve/install packages.
+    version: "260713t060441z-r2"
   kernelCmdline: "i915.enable_guc=3 i915.max_vfs=7 i915.force_probe=* udmabuf.list_limit=8192 console=tty0 console=ttyS0,115200n8"
   grubDefault: "Advanced options for Ubuntu>Ubuntu, with Linux 6.18-intel"
 
@@ -153,15 +187,15 @@ packageRepositories:
       - qemu-utils
       - qemu-system-modules-opengl
       - va-driver-all
-      # va-driver-all removed: it is a metapackage whose OR-dependency
-      # "intel-media-va-driver | intel-media-va-driver-non-free" made the resolver
-      # pull the FREE archive driver (intel-media-va-driver 24.1.0) as the first
-      # alternative. That free driver "Conflicts: intel-media-va-driver-non-free"
-      # (26.2.3, which we request), so dpkg aborted at unpack (build #8). Under
-      # real apt the OR is satisfied by the already-selected non-free driver and
-      # the free one is never installed, but this resolver takes the first literal
-      # alternative. Dropping the metapackage keeps the non-free driver clean.
-      # NOTE: this also drops the legacy i965-va-driver that va-driver-all pulled.
+      # va-driver-all is a metapackage whose OR-dependency
+      # "intel-media-va-driver | intel-media-va-driver-non-free" once made the
+      # resolver pull the FREE driver (intel-media-va-driver 24.1.0) as the first
+      # literal alternative. That free driver "Conflicts: intel-media-va-driver-non-free"
+      # (26.2.3, which we request), so dpkg aborted at unpack (build #8). The
+      # resolver now prefers an already-selected alternative — the already-requested
+      # non-free driver satisfies the OR and the free one is never pulled, matching
+      # apt — so the metapackage is safe to install (it also pulls the legacy
+      # i965-va-driver).
       - weston
       - linuxptp
       - libvpl-tools
@@ -221,7 +255,9 @@ packageRepositories:
       - xnest
       - xserver-xorg-dev
       - xvfb
-      # Intel kernel (installer.sh KernelUpdate, default 6.18-intel)
+      # Intel kernel (installer.sh KernelUpdate, default 6.18-intel). Indexed
+      # here so overlayPolicy.replaceKernel can resolve it from the PPA; it is
+      # installed via replaceKernel, not requested in systemConfig.packages.
       - linux-headers-6.18-intel
       - linux-image-6.18-intel
       - libavcodec62
@@ -262,14 +298,46 @@ systemConfig:
   # into the baseline. The bootloader and kernel are left untouched.
   packages:
     # --- Ubuntu archive packages ---
+    # udev/systemd: explicitly requested so the resolver upgrades them in lockstep
+    # with libudev1/libsystemd-shared. Some other requested package pulls a newer
+    # point release of those two libs (which udev/systemd exact-pin via
+    # ${binary:Version}); left implicit, the resolver upgrades only the libs and
+    # leaves udev/systemd at the baseline's older version, breaking the "="
+    # dependency at dpkg --configure time (build failure: "udev depends on
+    # libudev1 (= ...8.12); however: Version ... is ...8.17", same for systemd/
+    # libsystemd-shared).
+    - udev
+    - systemd
+    # libnss-systemd/libpam-systemd/systemd-oomd/systemd-resolved/systemd-sysv/
+    # systemd-timesyncd: separate binary packages from the same systemd source
+    # that exact-pin "=" systemd/libsystemd-shared; must be requested alongside
+    # systemd so they upgrade in lockstep too (build fix #9).
+    - libnss-systemd
+    - libpam-systemd
+    - systemd-oomd
+    - systemd-resolved
+    - systemd-sysv
+    - systemd-timesyncd
+    # libatomic1/libgcc-s1/libstdc++6/libgomp1: exact-pin "=" gcc-14-base;
+    # libegl-mesa0/libgl1-mesa-dri/libglx-mesa0: exact-pin "=" libgbm1 /
+    # mesa-libgallium. Requested so they upgrade in lockstep (build fix #9).
+    - libatomic1
+    - libgcc-s1
+    - libstdc++6
+    - libgomp1
+    - libegl-mesa0
+    - libgl1-mesa-dri
+    - libglx-mesa0
+    # openssh-sftp-server exact-pins "=" openssh-client (build fix #9).
+    - openssh-client
+    - openssh-sftp-server
     - vim
-    # vim-tiny: requested so it UPGRADES to 2:9.1.0016-1ubuntu7.18 rather than
-    # being removed. `vim` pulls vim-runtime 7.18, which declares
-    # "Breaks: vim-tiny (<< ...7.18)"; the baseline vim-tiny (7.9) tripped that,
-    # and the resolver's only fix was to remove vim-tiny — a removal that
-    # additive-and-upgrade blocks (build #5 conflict). Upgrading it satisfies the
-    # Breaks without any removal.
-    - vim-tiny
+    # NOTE: vim-tiny is intentionally NOT listed. `vim` pulls vim-runtime, which
+    # declares "Breaks: vim-tiny (<< ...)". The overlay now auto-upgrades a baseline
+    # package that a to-install package Breaks, so the baseline vim-tiny is upgraded
+    # to satisfy the Breaks without being requested here (it previously had to be
+    # listed by hand because the resolver's only remedy was removal, which the
+    # additive policy blocks).
     - ocl-icd-libopencl1
     - curl
     - openssh-server
@@ -329,21 +397,17 @@ systemConfig:
     - gcc
     - git
     - intel-gpu-tools
-    # NOTE: "libssl3" is intentionally NOT requested. On noble it is not a real
-    # package — it is a virtual name Provided by libssl3t64. Requesting it made
-    # the resolver take the Provides path, which does not compare versions and so
-    # dragged in the OLDEST libssl3t64 (base-noble 3.0.13-0ubuntu3); that older
-    # copy then won the libssl3t64 slot and left libssl-dev's "= ...3.11"
-    # dependency unsatisfiable (builds #5-#7). We request the real package
-    # (libssl3t64) directly, pinned below.
+    # We request the real package libssl3t64 directly (not the virtual "libssl3",
+    # which on noble is just a Provides alias), UNPINNED. libssl-dev strictly
+    # "Depends: libssl3t64 (= <its own version>)"; both are unpinned, so both
+    # resolve to the newest point release the repos serve and the exact "=" dep is
+    # satisfied automatically — no version to track. (Historically this had to be
+    # pinned to the exact point release: requesting the virtual "libssl3" took the
+    # Provides path, which pulled the OLDEST provider and broke libssl-dev's "="
+    # dep. The resolver now ranks same-named virtual providers newest-first, so
+    # that workaround is no longer needed.)
     - libssl-dev
-    # libssl3t64: VERSION-PINNED (name_version syntax) to the security build
-    # 3.0.13-0ubuntu3.11 so it matches libssl-dev, which strictly
-    # "Depends: libssl3t64 (= 3.0.13-0ubuntu3.11)". .11 is newer than the
-    # installed baseline .7, so it is upgrade-eligible and satisfies the exact
-    # "=" dependency. (libssl3t64 is the noble t64-ABI package; libssl3 is only
-    # its virtual/transitional alias — see the note above on why we dropped it.)
-    - libssl3t64_3.0.13-0ubuntu3.11
+    - libssl3t64
     - make
     - mosquitto
     - mosquitto-clients
@@ -424,10 +488,10 @@ systemConfig:
     - qemu-user-binfmt
     - qemu-utils
     - qemu-system-modules-opengl
-    #- va-driver-all
-    # va-driver-all removed — see the matching note in allowPackages above. Its
-    # OR-dep pulled the free intel-media-va-driver 24.1.0, which conflicts with
-    # the non-free 26.2.3 we install; dpkg aborted at unpack (build #8).
+    # va-driver-all restored: the resolver now prefers the already-requested
+    # non-free driver for its OR-dependency (see the note in allowPackages above),
+    # so the metapackage no longer drags in the conflicting free driver.
+    - va-driver-all
     - weston
     - linuxptp
     - libvpl-tools
@@ -480,11 +544,9 @@ systemConfig:
     - xnest
     - xserver-xorg-dev
     - xvfb
-    # --- Intel kernel update (installer.sh KernelUpdate, default 6.18-intel) ---
-    # Installer pins version 260713t060441z-r2; overlay resolves by name and takes
-    # the version served by the dated internal PPA snapshot in packageRepositories.
-    - linux-headers-6.18-intel
-    - linux-image-6.18-intel
+    # --- ffmpeg/libav (Intel PPA) ---
+    # The Intel kernel itself (installer.sh KernelUpdate, default 6.18-intel) is
+    # installed via overlayPolicy.replaceKernel above, not listed here.
     - libavcodec62
     - libavdevice62
     - libavfilter11
@@ -492,14 +554,3 @@ systemConfig:
     - libavutil60
     - libswresample6
     - libswscale9
-
-  # Kernel from installer.sh KernelUpdate (default, non-rt path). Version and
-  # cmdline mirror the installer's 6.18-intel branch; packages carry the pinned
-  # 260713t060441z-r2 build.
-  kernel:
-    version: "260713t060441z-r2"
-    cmdline: "i915.enable_guc=3 i915.max_vfs=7 i915.force_probe=* udmabuf.list_limit=8192 console=tty0 console=ttyS0,115200n8"
-    enableExtraModules: "intel_vpu uas"
-    packages:
-      - linux-image-6.18-intel_260713t060441z-r2
-      - linux-headers-6.18-intel_260713t060441z-r2
