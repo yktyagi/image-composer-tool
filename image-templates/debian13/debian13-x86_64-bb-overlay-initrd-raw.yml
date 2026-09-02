@@ -101,6 +101,27 @@ baseline:
     # format: qcow2
 
 # -----------------------------------------------------------------------------
+# The Debian archive does not publish an "-intel" kernel; overlayPolicy.replaceKernel
+# below names linux-image-6.18-intel / linux-headers-6.18-intel, so add the Intel
+# overlay apt feed that ships them (the same feed used by the Ubuntu/eLxr templates
+# for their -intel kernels — it is a plain apt repo, so it works for a Debian-family
+# baseline too). allowPackages pins it to just the two kernel packages so nothing
+# else on this image is inadvertently pulled from a non-Debian feed.
+# -----------------------------------------------------------------------------
+packageRepositories:
+  - codename: "localdeb2"
+    # Point this at a local apt repo containing the sriov kernel .debs
+    # (e.g. built with dpkg-scanpackages) before building this template.
+    path: "/data/repos/localdeb2"
+    pkey: "[trusted=yes]"
+    component: "kernels"
+    priority: 2000
+    allowPackages:
+      - linux-image-6.18.19-sriov
+      - linux-headers-6.18.19-sriov
+
+
+# -----------------------------------------------------------------------------
 # Output: a qcow2 artifact. The overlay emits a RAW copy, then the Convert
 # Artifacts stage produces every format listed here. disk.size is a floor the
 # resize always expands the baseline to first (no opt-in needed); the tool then
@@ -149,6 +170,12 @@ overlayPolicy:
   # dependency an alternative still satisfies is never removed, and it still fails closed
   # if resolving the breakage would require removing a bootloader/kernel-image package.
   allowPackageRemoval: true
+  replaceKernel:
+    package: linux-image-6.18.19-sriov
+    additionalPackages:
+      - linux-headers-6.18.19-sriov
+  kernelCmdline: "console=ttyS0,115200 console=tty0 loglevel=7 rd.debug rd.info intel_iommu=on iommu=pt udmabuf.list_limit=8192 modprobe.blacklist=xe i915.force_probe=* i915.max_vfs=7 i915.enable_guc=3"
+  grubDefault: "0"
 
 systemConfig:
   name: overlay
@@ -266,6 +293,19 @@ systemConfig:
       final: /usr/lib/dracut/modules.d/91hello/initqueue-sample.sh
       stage: pre-initramfs
 
+    # tcdisk module files
+    - local: additionalfiles/debian13-bb-dracut/modules.d/92tcdisk/module-setup.sh
+      final: /usr/lib/dracut/modules.d/92tcdisk/module-setup.sh
+      stage: pre-initramfs
+    - local: additionalfiles/debian13-bb-dracut/modules.d/92tcdisk/tcdisk.sh
+      final: /usr/lib/dracut/modules.d/92tcdisk/tcdisk.sh
+      stage: pre-initramfs
+    # tc-client binary not yet present under 92tcdisk/ — add the file and
+    # uncomment once it exists.
+    # - local: additionalfiles/debian13-bb-dracut/modules.d/92tcdisk/tc-client
+    #   final: /usr/lib/dracut/modules.d/92tcdisk/tc-client
+    #   stage: pre-initramfs
+
     # ---------------------------------------------------------------------------
     # Bare-metal bring-up (DHCP networking + SSH) — runs at BOOT, not build.
     #
@@ -350,3 +390,8 @@ systemConfig:
     # one (a password hash or an authorized_keys file) or MODE A starts sshd with
     # no way to log in.
     # ==========================================================================
+
+    # tcdisk module configuration
+    - cmd: 'mkdir -p /etc/dracut.conf.d && echo ''add_dracutmodules+=" tcdisk "'' > /etc/dracut.conf.d/92tcdisk.conf'
+    # disable initrd commands, they are not supported
+    #- cmd: "chmod 755 /usr/lib/dracut/modules.d/92tcdisk/module-setup.sh /usr/lib/dracut/modules.d/92tcdisk/tcdisk.sh /usr/lib/dracut/modules.d/92tcdisk/tc-client"
