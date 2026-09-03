@@ -258,6 +258,14 @@ systemConfig:
     - firmware-intel-graphics
     - firmware-intel-misc
     - firmware-iwlwifi
+    # CPU microcode. The Debian cloud baseline this overlay starts from never
+    # ships it — cloud images assume the hypervisor supplies microcode — but this
+    # template targets bare metal AND turns on intel_iommu=on/iommu=pt plus i915
+    # SR-IOV VF creation (overlayPolicy.kernelCmdline below), which on real Intel
+    # silicon needs the microcode fixes for known IOMMU/VT-d and GuC-submission
+    # errata in that path. Without it, real hardware can hang/reset early boot in
+    # a way no hypervisor-based test ever reproduces.
+    - intel-microcode
 
   # ---------------------------------------------------------------------------
   # Custom dracut module (91hello) for Bayonne Bridge early-boot requirements.

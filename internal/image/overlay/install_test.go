@@ -37,6 +37,16 @@ type fakeInstaller struct {
 	// removedBeforeInstall records whether removePackages ran before install, so a
 	// test can assert the conflict-driven removal precedes the install.
 	removedBeforeInstall bool
+	// orphans and orphansErr are removeOrphans' canned result; orphanCalls counts
+	// invocations so a test can assert it ran (or didn't) under a given policy gate.
+	orphans     []string
+	orphansErr  error
+	orphanCalls int
+	// callLog records, in order, which of removePackages/removeOrphans ran — each
+	// entry is "removePackages:<names joined by ,>" or "removeOrphans" — so a test
+	// can assert the forward-orphan sweep runs AFTER every reverse-cascade removal,
+	// not interleaved with or before it.
+	callLog []string
 }
 
 func (f *fakeInstaller) family() PackageManager { return f.fam }
@@ -50,6 +60,7 @@ func (f *fakeInstaller) install(req installRequest) error {
 func (f *fakeInstaller) removePackages(_ string, names []string) error {
 	f.removeCalls++
 	f.gotRemoved = append(f.gotRemoved, names...)
+	f.callLog = append(f.callLog, "removePackages:"+strings.Join(names, ","))
 	if f.installCalls == 0 {
 		f.removedBeforeInstall = true
 	}
@@ -73,6 +84,12 @@ func (f *fakeInstaller) auditDependencies(_ string) ([]string, string, error) {
 		err = f.auditErr[idx]
 	}
 	return broken, "", err
+}
+
+func (f *fakeInstaller) removeOrphans(_ string) ([]string, error) {
+	f.orphanCalls++
+	f.callLog = append(f.callLog, "removeOrphans")
+	return f.orphans, f.orphansErr
 }
 
 // installHarness wires the install-stage seams to in-memory fakes and records
@@ -293,6 +310,131 @@ func TestInstallOverlayPackages_CascadeRemovesOrphanedReverseDep(t *testing.T) {
 	}
 	if report.Removes != 1 {
 		t.Errorf("report.Removes = %d, want 1 (the cascade removal)", report.Removes)
+	}
+}
+
+// TestInstallOverlayPackages_RemovesForwardDependencyOrphans confirms that a
+// package left installed-but-unneeded as a FORWARD dependency of an approved
+// removal (e.g. initramfs-tools-core, once initramfs-tools itself is purged) is
+// swept by removeOrphans and folded into the result/report the same way a
+// reverse-dependency cascade removal is — auditDependencies alone cannot see
+// this case, since the orphan stays self-satisfied.
+func TestInstallOverlayPackages_RemovesForwardDependencyOrphans(t *testing.T) {
+	dir := writeArtifacts(t, t.TempDir(), "dracut_1.deb")
+	plan := &ResolutionPlan{
+		DownloadDir: dir,
+		ToInstall:   []ResolvedPackage{{Name: "dracut", Version: "1", URL: "https://r/dracut_1.deb"}},
+	}
+	report := &PreflightReport{ToRemove: []string{"initramfs-tools"}, ApprovedRemovals: []string{"initramfs-tools"}, CollateralRemovalAuthorized: true}
+	backend := &fakeInstaller{fam: PackageManagerAPT, orphans: []string{"initramfs-tools-core"}}
+	h := &installHarness{}
+
+	var result *InstallResult
+	var err error
+	withStubbedInstall(t, backend, h, func() {
+		result, err = InstallOverlayPackages(aptInfo(), "/mnt/root", plan, report)
+	})
+	if err != nil {
+		t.Fatalf("sweeping a forward-dependency orphan should succeed, got %v", err)
+	}
+	if backend.orphanCalls != 1 {
+		t.Errorf("removeOrphans call count = %d, want 1", backend.orphanCalls)
+	}
+	if !reflect.DeepEqual(result.CascadeRemoved, []string{"initramfs-tools-core"}) {
+		t.Errorf("result.CascadeRemoved = %v, want [initramfs-tools-core]", result.CascadeRemoved)
+	}
+	if !contains(report.ApprovedRemovals, "initramfs-tools-core") {
+		t.Errorf("orphan sweep must be folded into report.ApprovedRemovals, got %v", report.ApprovedRemovals)
+	}
+}
+
+// TestInstallOverlayPackages_RemoveOrphansRunsAfterReverseCascade is a
+// regression test for a real build failure: `apt-get autoremove` performs full
+// dependency resolution and refuses to act while ANY installed package has an
+// unmet dependency — e.g. cloud-initramfs-growroot still depending on the
+// just-purged initramfs-tools — even one unrelated to what it would remove.
+// The forward-orphan sweep MUST run only after the reverse-dependency cascade
+// below has fixed that breakage, never interleaved with or before it.
+func TestInstallOverlayPackages_RemoveOrphansRunsAfterReverseCascade(t *testing.T) {
+	dir := writeArtifacts(t, t.TempDir(), "dracut_1.deb")
+	plan := &ResolutionPlan{
+		DownloadDir: dir,
+		ToInstall:   []ResolvedPackage{{Name: "dracut", Version: "1", URL: "https://r/dracut_1.deb"}},
+	}
+	report := &PreflightReport{ToRemove: []string{"initramfs-tools"}, ApprovedRemovals: []string{"initramfs-tools"}, CollateralRemovalAuthorized: true}
+	// Healthy before the removal; "cloud-initramfs-growroot" orphaned after the
+	// install (the reverse-dependency cascade must clear this before orphans run).
+	backend := &fakeInstaller{
+		fam:         PackageManagerAPT,
+		auditBroken: [][]string{nil, {"cloud-initramfs-growroot"}, nil},
+		orphans:     []string{"initramfs-tools-core"},
+	}
+	h := &installHarness{}
+
+	var result *InstallResult
+	var err error
+	withStubbedInstall(t, backend, h, func() {
+		result, err = InstallOverlayPackages(aptInfo(), "/mnt/root", plan, report)
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if backend.orphanCalls != 1 {
+		t.Fatalf("removeOrphans call count = %d, want 1", backend.orphanCalls)
+	}
+	wantLog := []string{"removePackages:initramfs-tools", "removePackages:cloud-initramfs-growroot", "removeOrphans"}
+	if !reflect.DeepEqual(backend.callLog, wantLog) {
+		t.Errorf("call order = %v, want %v (orphan sweep must follow the reverse-dependency cascade)", backend.callLog, wantLog)
+	}
+	if !reflect.DeepEqual(result.CascadeRemoved, []string{"cloud-initramfs-growroot", "initramfs-tools-core"}) {
+		t.Errorf("result.CascadeRemoved = %v, want [cloud-initramfs-growroot initramfs-tools-core]", result.CascadeRemoved)
+	}
+}
+
+// TestInstallOverlayPackages_RemoveOrphansSkippedWithoutAuthorization confirms
+// the orphan sweep is gated exactly like the reverse-dependency cascade: a
+// kernel-family-only removal (ToRemove non-empty, allowPackageRemoval off) must
+// not trigger it, matching the cascade's fail-closed behavior for collateral
+// cleanup it did not authorize.
+func TestInstallOverlayPackages_RemoveOrphansSkippedWithoutAuthorization(t *testing.T) {
+	dir := writeArtifacts(t, t.TempDir(), "dracut_1.deb")
+	plan := &ResolutionPlan{
+		DownloadDir: dir,
+		ToInstall:   []ResolvedPackage{{Name: "dracut", Version: "1", URL: "https://r/dracut_1.deb"}},
+	}
+	report := &PreflightReport{ToRemove: []string{"initramfs-tools"}, ApprovedRemovals: []string{"initramfs-tools"}, CollateralRemovalAuthorized: false}
+	backend := &fakeInstaller{fam: PackageManagerAPT, orphans: []string{"initramfs-tools-core"}}
+	h := &installHarness{}
+
+	withStubbedInstall(t, backend, h, func() {
+		if _, err := InstallOverlayPackages(aptInfo(), "/mnt/root", plan, report); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if backend.orphanCalls != 0 {
+		t.Errorf("removeOrphans must not run without CollateralRemovalAuthorized, got %d call(s)", backend.orphanCalls)
+	}
+}
+
+// TestInstallOverlayPackages_RemoveOrphansErrorFailsBuild confirms a
+// removeOrphans failure aborts the build rather than shipping an image with an
+// unresolved orphan-sweep error silently swallowed.
+func TestInstallOverlayPackages_RemoveOrphansErrorFailsBuild(t *testing.T) {
+	dir := writeArtifacts(t, t.TempDir(), "dracut_1.deb")
+	plan := &ResolutionPlan{
+		DownloadDir: dir,
+		ToInstall:   []ResolvedPackage{{Name: "dracut", Version: "1", URL: "https://r/dracut_1.deb"}},
+	}
+	report := &PreflightReport{ToRemove: []string{"initramfs-tools"}, ApprovedRemovals: []string{"initramfs-tools"}, CollateralRemovalAuthorized: true}
+	backend := &fakeInstaller{fam: PackageManagerAPT, orphansErr: errors.New("apt-get autoremove: dpkg database is locked")}
+	h := &installHarness{}
+
+	var err error
+	withStubbedInstall(t, backend, h, func() {
+		_, err = InstallOverlayPackages(aptInfo(), "/mnt/root", plan, report)
+	})
+	if err == nil {
+		t.Fatal("expected the build to fail when removeOrphans errors, got nil")
 	}
 }
 

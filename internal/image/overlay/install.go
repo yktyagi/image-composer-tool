@@ -97,6 +97,19 @@ type installerBackend interface {
 	// package+requirement granularity, so a new failure on an already-broken package
 	// is still caught and a version/arch change is not mistaken for new breakage.
 	auditDependencies(chrootPath string) (broken []string, output string, err error)
+	// removeOrphans purges baseline packages left installed-but-unneeded after an
+	// approved conflict-driven removal — a FORWARD dependency of the removed
+	// package that is now self-satisfied but required by nothing else (e.g.
+	// initramfs-tools-core/initramfs-tools-bin once initramfs-tools itself is
+	// purged so dracut can install). auditDependencies only catches a REVERSE
+	// dependency break (a package whose OWN Depends is now unmet) and structurally
+	// cannot see this case, since an orphaned-but-self-satisfied package reports no
+	// failure. This uses the package manager's own auto-installed bookkeeping
+	// (apt's extended_states / dnf's history db) rather than a hand-rolled Depends
+	// walk, so it only ever removes what the package manager itself judges
+	// orphaned — never a manually-installed baseline package. Returns the names
+	// actually removed, sorted, or nil if none were.
+	removeOrphans(chrootPath string) (removed []string, err error)
 }
 
 // Install-stage indirection seams over the impure dependencies (the package
@@ -314,6 +327,7 @@ func InstallOverlayPackages(info *BaselineInfo, rootMount string, plan *Resoluti
 			toInstallNames[p.Name] = true
 		}
 		family := backend.family()
+
 		// The installed set strictly shrinks each pass (every pass purges the packages
 		// it found newly broken, so they cannot reappear), so a real cascade converges in
 		// a handful of passes. The cap is a pure backstop against a pathological audit
@@ -403,6 +417,30 @@ func InstallOverlayPackages(info *BaselineInfo, rootMount string, plan *Resoluti
 				return nil, fmt.Errorf("overlay install: failed to cascade-remove %d orphaned baseline package(s): %w", len(removeOperands), rerr)
 			}
 			cascadeRemoved = append(cascadeRemoved, removedNames...)
+		}
+
+		// Sweep FORWARD-dependency orphans left behind by the removal(s) above, now
+		// that the reverse-dependency cascade has converged. This MUST run after the
+		// cascade, not before: unlike auditDependencies' read-only `apt-get check`,
+		// `apt-get autoremove` performs real dependency resolution and refuses to act
+		// at all — on anything — while ANY package in the installed set has an unmet
+		// dependency (e.g. cloud-initramfs-growroot still depending on the
+		// just-purged initramfs-tools), even one unrelated to what it would remove.
+		// Gated identically to the cascade (CollateralRemovalAuthorized): cleaning up
+		// a removed package's own now-unused dependencies is exactly the kind of
+		// collateral effect that gate exists for, and a kernel-family swap alone
+		// (ToRemove non-empty, allowPackageRemoval off) must not trigger it, matching
+		// the cascade's fail-closed behavior for that case.
+		if report.CollateralRemovalAuthorized {
+			orphans, oerr := backend.removeOrphans(rootMount)
+			if oerr != nil {
+				return nil, fmt.Errorf("overlay install: failed to remove orphaned baseline package(s) after the approved removal(s): %w", oerr)
+			}
+			if len(orphans) > 0 {
+				log.Infof("Overlay install: removed %d baseline package(s) orphaned by the approved removal(s): %s",
+					len(orphans), strings.Join(orphans, ", "))
+				cascadeRemoved = append(cascadeRemoved, orphans...)
+			}
 		}
 
 		// Fold the cascade removals into the preflight report so downstream reporting
@@ -759,6 +797,51 @@ func (b *debInstallerBackend) verifyInstalled(chrootPath string, pkgs []Resolved
 	return missing, nil
 }
 
+// removeOrphans runs `apt-get -y --purge autoremove`, which purges every package
+// apt's own auto-installed bookkeeping (extended_states) judges no longer
+// required by anything installed — exactly the gap the conflict-driven
+// `dpkg --purge --force-depends` removal above leaves: a package the removed one
+// depended on (e.g. initramfs-tools-core, once initramfs-tools is purged) stays
+// installed and self-satisfied, so auditDependencies' apt-get check never flags
+// it. Diffing the installed-package set before and after (rather than parsing
+// apt-get's locale-dependent transaction summary) reports exactly what changed.
+func (b *debInstallerBackend) removeOrphans(chrootPath string) ([]string, error) {
+	envVars := []string{
+		"DEBIAN_FRONTEND=noninteractive",
+		"DEBCONF_NONINTERACTIVE_SEEN=true",
+		"DEBCONF_NOWARNINGS=yes",
+	}
+	before, err := installedDebPackages(chrootPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to snapshot installed packages before autoremove: %w", err)
+	}
+	out, err := shell.ExecCmdWithStream("apt-get -y --purge autoremove", true, chrootPath, envVars)
+	if err != nil {
+		return nil, fmt.Errorf("apt-get autoremove failed: %w%s", err, formatCommandOutput(out))
+	}
+	after, err := installedDebPackages(chrootPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to snapshot installed packages after autoremove: %w", err)
+	}
+	return diffRemoved(before, after), nil
+}
+
+// installedDebPackages returns the set of package names dpkg currently reports as
+// fully installed ("ii" status flags in `dpkg -l`).
+func installedDebPackages(chrootPath string) (map[string]bool, error) {
+	out, err := shell.ExecCmdSilent(`dpkg -l | awk '$1=="ii"{print $2}'`, true, chrootPath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dpkg -l failed: %w%s", err, formatCommandOutput(out))
+	}
+	set := make(map[string]bool)
+	for _, line := range strings.Split(out, "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			set[name] = true
+		}
+	}
+	return set, nil
+}
+
 // rpmInstallerBackend installs prepared .rpm artifacts into the baseline chroot
 // with rpm. As with deb, the additive set is installed from local files only; the
 // pre-resolved closure satisfies dependencies among the new packages.
@@ -881,6 +964,58 @@ func (b *rpmInstallerBackend) verifyInstalled(chrootPath string, pkgs []Resolved
 		missing = append(missing, p.Name)
 	}
 	return missing, nil
+}
+
+// removeOrphans runs `dnf -y autoremove`, the rpm-family analogue of the deb
+// backend's `apt-get --purge autoremove`: it purges every package dnf's own
+// history/auto-installed bookkeeping judges no longer required by anything
+// installed, catching a forward dependency of an `rpm -e --nodeps` removal above
+// that stays self-satisfied (so `dnf check --dependencies` never flags it).
+// Diffing the installed-package set before and after avoids parsing dnf's
+// transaction summary.
+func (b *rpmInstallerBackend) removeOrphans(chrootPath string) ([]string, error) {
+	before, err := installedRpmPackages(chrootPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to snapshot installed packages before autoremove: %w", err)
+	}
+	out, err := shell.ExecCmdWithStream("dnf -y autoremove", true, chrootPath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dnf autoremove failed: %w%s", err, formatCommandOutput(out))
+	}
+	after, err := installedRpmPackages(chrootPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to snapshot installed packages after autoremove: %w", err)
+	}
+	return diffRemoved(before, after), nil
+}
+
+// installedRpmPackages returns the set of package names currently installed
+// according to the rpm database.
+func installedRpmPackages(chrootPath string) (map[string]bool, error) {
+	out, err := shell.ExecCmdSilent(`rpm -qa --qf '%{NAME}\n'`, true, chrootPath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("rpm -qa failed: %w%s", err, formatCommandOutput(out))
+	}
+	set := make(map[string]bool)
+	for _, line := range strings.Split(out, "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			set[name] = true
+		}
+	}
+	return set, nil
+}
+
+// diffRemoved returns the names present in before but absent from after,
+// sorted — the packages a removeOrphans pass actually removed.
+func diffRemoved(before, after map[string]bool) []string {
+	var removed []string
+	for name := range before {
+		if !after[name] {
+			removed = append(removed, name)
+		}
+	}
+	sort.Strings(removed)
+	return removed
 }
 
 // isNotInstalledOutput reports whether package-manager query output carries the
