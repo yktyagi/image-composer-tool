@@ -1,0 +1,37 @@
+# AI-searchable metadata for template discovery
+metadata:
+  description: Cloud-init enabled Ubuntu 24.04 bootable ISO image for installation media
+  use_cases:
+    - Creating bootable installation media
+    - USB/DVD installation
+    - Bare metal provisioning
+    - System recovery
+  keywords:
+    - iso
+    - bootable
+    - installation
+    - usb
+    - dvd
+    - minimal
+    - ubuntu
+
+image:
+  name: cloud-init-os-image-ubuntu
+  version: "24.04"
+
+target:
+  os: ubuntu
+  dist: ubuntu24
+  arch: x86_64
+  imageType: iso # Image type, valid value: [raw, iso].
+
+systemConfig:
+  name: Cloud_Init_ISO
+  description: Example yml configuration for iso image with cloud-init
+  packages:
+    - cloud-init
+  additionalFiles:
+    - local: additionalfiles/meta-data
+      final: /var/lib/cloud/seed/nocloud/meta-data
+    - local: additionalfiles/user-data
+      final: /var/lib/cloud/seed/nocloud/user-data
