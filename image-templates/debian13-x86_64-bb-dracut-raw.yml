@@ -115,6 +115,29 @@ systemConfig:
     - vim-tiny
     - whiptail
     - zstd
+    # ---------------------------------------------------------------------------
+    # X11 graphics stack. See the additionalFiles/configurations below for why
+    # X11 (not Wayland) — Debian 13's gnome-session ships no X11 session file,
+    # so gnome-xorg.desktop below supplies the missing launcher rather than a
+    # package providing it.
+    # ---------------------------------------------------------------------------
+    - xserver-xorg
+    - xserver-xorg-video-all
+    - xserver-xorg-input-all
+    - xinit
+    - x11-xserver-utils
+    - x11-utils
+    - libgl1-mesa-dri
+    - libglx-mesa0
+    - mesa-utils
+    - mesa-vulkan-drivers
+    - fonts-dejavu-core
+    - libgtk-3-0
+    - gdm3
+    - gnome-session
+    - gnome-shell
+    - gnome-terminal
+    - gnome-software
 
   additionalFiles:
     - local: additionalfiles/debian13-bb-dracut/modules.d/91hello/module-setup.sh
@@ -123,12 +146,37 @@ systemConfig:
       final: /usr/lib/dracut/modules.d/91hello/hello.sh
     - local: additionalfiles/debian13-bb-dracut/modules.d/91hello/initqueue-sample.sh
       final: /usr/lib/dracut/modules.d/91hello/initqueue-sample.sh
+    # X11, not Wayland — see debian13-x86_64-bb-graphics-raw.yml for the full
+    # rationale (Debian 13's gnome-session ships Wayland-only; gnome-shell's
+    # X11 backend still works, it's just missing the xsessions launcher; and
+    # gnome-shell's default experimental Mutter features have a known
+    # click-coordinate-mapping bug this dconf override disables).
+    - local: additionalfiles/debian13-bb-graphics-x11/usr/share/xsessions/gnome-xorg.desktop
+      final: /usr/share/xsessions/gnome-xorg.desktop
+    - local: additionalfiles/debian13-bb-graphics-mutter/etc/dconf/profile/user
+      final: /etc/dconf/profile/user
+    - local: additionalfiles/debian13-bb-graphics-mutter/etc/dconf/db/local.d/00-mutter
+      final: /etc/dconf/db/local.d/00-mutter
+    - local: additionalfiles/debian13-bb-graphics-mutter/etc/systemd/system/dconf-update-mutter.service
+      final: /etc/systemd/system/dconf-update-mutter.service
 
   configurations:
     - cmd: 'mkdir -p /etc/dracut.conf.d && echo ''add_dracutmodules+=" hello "'' > /etc/dracut.conf.d/91hello.conf'
     - cmd: "chmod 755 /usr/lib/dracut/modules.d/91hello/module-setup.sh /usr/lib/dracut/modules.d/91hello/hello.sh /usr/lib/dracut/modules.d/91hello/initqueue-sample.sh"
     - cmd: "printf 'Package: systemd-boot systemd-boot-efi\\nPin: release *\\nPin-Priority: -1\\n' > /etc/apt/preferences.d/no-systemd-boot"
     - cmd: "dpkg --purge --force-all systemd-boot systemd-boot-efi 2>/dev/null || true"
+    # Graphical login: gdm3 is WantedBy=graphical.target, so the default target
+    # must switch from multi-user.target or gdm never starts (see
+    # debian13-x86_64-bb-graphics-raw.yml for the fuller explanation).
+    - cmd: 'systemctl set-default graphical.target'
+    - cmd: 'systemctl enable gdm3'
+    # Remove the Wayland session files gnome-session ships, so GDM has exactly
+    # one session (X11) to offer — no ambiguity, no accidental Wayland fallback.
+    - cmd: 'rm -f /usr/share/wayland-sessions/gnome.desktop /usr/share/wayland-sessions/gnome-wayland.desktop'
+    # Enable the first-boot dconf compile: this symlink's target is delivered by
+    # additionalFiles, which in create mode may not have landed yet at this point
+    # in the build — a symlink doesn't need its target to exist until boot time.
+    - cmd: 'mkdir -p /etc/systemd/system/multi-user.target.wants && ln -sf /etc/systemd/system/dconf-update-mutter.service /etc/systemd/system/multi-user.target.wants/dconf-update-mutter.service'
 
   kernel:
     cmdline: "console=ttyS0,115200 console=tty0 loglevel=7 rd.debug rd.info"
