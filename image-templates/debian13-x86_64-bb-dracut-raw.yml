@@ -1,9 +1,11 @@
 # AI-searchable metadata for template discovery
 metadata:
-  description: Debian 13 raw image with initrd hello hook via dracut-core (GRUB) and a GNOME/X11 desktop
+  description: Debian 13 raw image with initrd hello + tcdisk hooks via dracut-core (GRUB), a self-built SR-IOV kernel, a BB uccadmin login, and a GNOME/X11 desktop
   use_cases:
     - Validating custom dracut module scripts on Debian GRUB raw images
     - Lightweight Debian with early-boot initrd marker
+    - Booting a BB-provisioned image over the tcdisk network-disk dracut module
+    - Running a self-built Intel SR-IOV kernel with GPU-virtualization cmdline flags
     - Booting into a GNOME-on-Xorg desktop session (GDM login)
     - Running a one-time setup script on the device's first boot
   keywords:
@@ -12,6 +14,9 @@ metadata:
     - dracut-core
     - initrd
     - hello
+    - tcdisk
+    - self-built-kernel
+    - uccadmin
     - debian
     - grub
     - raw
@@ -31,6 +36,22 @@ target:
   dist: debian13
   arch: x86_64
   imageType: raw
+
+# -----------------------------------------------------------------------------
+# Local apt feed for the self-built SR-IOV kernel named by kernel.packages below.
+# Debian's archive does not publish this kernel; allowPackages pins the feed to
+# just the two kernel packages so nothing else on this image is pulled from a
+# non-Debian source. Path is specific to the BB build host.
+# -----------------------------------------------------------------------------
+packageRepositories:
+  - codename: "localdeb2"
+    path: "/home/bright/localdeb2"
+    pkey: "[trusted=yes]"
+    component: "kernels"
+    priority: 2000
+    allowPackages:
+      - linux-image-6.18.19-sriov
+      - linux-headers-6.18.19-sriov
 
 disk:
   name: Minimal_Raw # 1:1 mapping to the systemConfigs name
@@ -105,6 +126,7 @@ systemConfig:
     - mawk
     - nano
     - netplan.io
+    - ntfs-3g
     - pciutils
     - polkitd
     - psmisc
@@ -147,6 +169,14 @@ systemConfig:
     - gnome-terminal
     - gnome-software
 
+  users:
+    # BB login for the tcdisk-provisioned boot path — see the additionalFiles/
+    # configurations below for the 92tcdisk dracut module.
+    - name: uccadmin
+      password: "$6$kCsNoG0d2ZNR3T.D$9TQGs96VM8IMCnZFCW49fwBrjv4cRQdvmUtcZS24uE8NaSXBAGbqk1lW1UY0IHZfSW7egSmi1Oo.r8XOFZBgO0"   # e.g. `openssl passwd -6`; NOT plaintext
+      hash_algo: sha512   # required so the tool treats password as pre-hashed (usermod -p) instead of literal plaintext (passwd)
+      groups: ["sudo", "adm"]
+
   additionalFiles:
     - local: additionalfiles/debian13-bb-dracut/modules.d/91hello/module-setup.sh
       final: /usr/lib/dracut/modules.d/91hello/module-setup.sh
@@ -154,6 +184,12 @@ systemConfig:
       final: /usr/lib/dracut/modules.d/91hello/hello.sh
     - local: additionalfiles/debian13-bb-dracut/modules.d/91hello/initqueue-sample.sh
       final: /usr/lib/dracut/modules.d/91hello/initqueue-sample.sh
+    - local: additionalfiles/debian13-bb-dracut/modules.d/92tcdisk/module-setup.sh
+      final: /usr/lib/dracut/modules.d/92tcdisk/module-setup.sh
+    - local: additionalfiles/debian13-bb-dracut/modules.d/92tcdisk/tcdisk.sh
+      final: /usr/lib/dracut/modules.d/92tcdisk/tcdisk.sh
+    - local: additionalfiles/debian13-bb-dracut/modules.d/92tcdisk/tc-client
+      final: /usr/lib/dracut/modules.d/92tcdisk/tc-client
     # X11, not Wayland — Debian 13's gnome-session ships Wayland-only;
     # gnome-shell's X11 backend still works, it's just missing the xsessions
     # launcher, supplied below. The dconf override below also disables a
@@ -176,6 +212,8 @@ systemConfig:
   configurations:
     - cmd: 'mkdir -p /etc/dracut.conf.d && echo ''add_dracutmodules+=" hello "'' > /etc/dracut.conf.d/91hello.conf'
     - cmd: "chmod 755 /usr/lib/dracut/modules.d/91hello/module-setup.sh /usr/lib/dracut/modules.d/91hello/hello.sh /usr/lib/dracut/modules.d/91hello/initqueue-sample.sh"
+    - cmd: 'mkdir -p /etc/dracut.conf.d && echo ''add_dracutmodules+=" tcdisk "'' > /etc/dracut.conf.d/92tcdisk.conf'
+    - cmd: "chmod 755 /usr/lib/dracut/modules.d/92tcdisk/module-setup.sh /usr/lib/dracut/modules.d/92tcdisk/tcdisk.sh /usr/lib/dracut/modules.d/92tcdisk/tc-client"
     - cmd: "printf 'Package: systemd-boot systemd-boot-efi\\nPin: release *\\nPin-Priority: -1\\n' > /etc/apt/preferences.d/no-systemd-boot"
     - cmd: "dpkg --purge --force-all systemd-boot systemd-boot-efi 2>/dev/null || true"
     # Graphical login: gdm3 is WantedBy=graphical.target, so the default target
@@ -195,6 +233,10 @@ systemConfig:
     - cmd: 'systemctl enable first-boot-sample.service'
 
   kernel:
-    cmdline: "console=ttyS0,115200 console=tty0 loglevel=7 rd.debug rd.info"
+    # Self-built Intel SR-IOV kernel (see packageRepositories above) in place of
+    # the stock linux-image-amd64; cmdline enables IOMMU passthrough + i915
+    # SR-IOV VF flags for GPU virtualization.
+    cmdline: "console=ttyS0,115200 console=tty0 loglevel=7 rd.debug rd.info intel_iommu=on iommu=pt udmabuf.list_limit=8192 modprobe.blacklist=xe i915.force_probe=* i915.max_vfs=7 i915.enable_guc=3"
     packages:
-      - linux-image-amd64
+      - linux-image-6.18.19-sriov
+      - linux-headers-6.18.19-sriov
