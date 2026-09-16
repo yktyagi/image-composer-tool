@@ -61,6 +61,22 @@ disk:
       mountPoint: /
       mountOptions: defaults
 
+# Local apt repo for the locally-built Intel-patched QEMU package (replaces
+# the standard qemu-system-x86/qemu-utils/qemu-guest-agent packages — see
+# the allowPackages/packages comment below for why). ICT generates the
+# Packages/Release metadata itself (dpkg-scanpackages) from whatever .deb
+# files sit in `path` — no need to hand-build an apt repo.
+packageRepositories:
+  - codename: "qemu-intel-local"
+    # Hardcoded local path — update to wherever the qemu-intel .deb lives on
+    # your build machine.
+    path: "/home/repos/localdeb2"
+    pkey: "[trusted=yes]"
+    component: "main"
+    priority: 2000
+    allowPackages:
+      - qemu-intel
+
 systemConfig:
   name: bb-dracut
   description: Minimal debian raw image with initrd hello (dracut-core, GRUB)
@@ -87,6 +103,13 @@ systemConfig:
     - firmware-intel-graphics
     - firmware-intel-misc
     - firmware-iwlwifi
+    # gcc/linux-libc-dev/python3-dev/python3-venv (below): build prerequisites
+    # for install-debian.sh's install_ucc_venv(), which creates the ucc venv
+    # and pip-installs evdev (needs a C compiler + headers). The script
+    # assumes these already exist rather than installing them itself, and
+    # since packages here install before configurations/the script run, they
+    # have to be declared here.
+    - gcc
     - grub-cloud-amd64
     - init
     - iptables
@@ -99,6 +122,7 @@ systemConfig:
     - libpam-modules-bin
     - libpam-systemd
     - libss2
+    - linux-libc-dev
     - linux-sysctl-defaults
     - man-db
     - manpages
@@ -108,7 +132,9 @@ systemConfig:
     - pciutils
     - polkitd
     - psmisc
+    - python3-dev
     - python3-minimal
+    - python3-venv
     - reportbug
     - wireless-regdb
     - screen
@@ -121,6 +147,11 @@ systemConfig:
     - uuid-runtime
     - vim
     - vim-tiny
+    - wget
+    # Intel-patched QEMU 9.1.0, from the local repo above (priority 2000
+    # makes the resolver prefer it; it also bundles what qemu-system-x86/
+    # qemu-utils/qemu-guest-agent normally provide, so those aren't listed).
+    - qemu-intel
     - whiptail
     - zstd
     # ---------------------------------------------------------------------------
@@ -164,6 +195,13 @@ systemConfig:
       final: /etc/dconf/profile/user
     - local: additionalfiles/debian13-bb-graphics-mutter/etc/dconf/db/local.d/00-mutter
       final: /etc/dconf/db/local.d/00-mutter
+    # UCC VM-control keyboard shortcuts. The install-debian.sh invocation
+    # below stages /usr/lib/ucc/app (including the built venv/dist/vmsetup
+    # binary) and enables ucc-init.service, which copies it to /ucc/app at
+    # first boot — so all 5 shortcuts (VMControl + Shift+Super+1-4) resolve
+    # once the device boots.
+    - local: additionalfiles/debian13-bb-graphics-mutter/etc/dconf/db/local.d/01-custom-keybindings
+      final: /etc/dconf/db/local.d/01-custom-keybindings
     - local: additionalfiles/debian13-bb-graphics-mutter/etc/systemd/system/dconf-update-mutter.service
       final: /etc/systemd/system/dconf-update-mutter.service
     # Sample script that runs once on the device's first boot only (see
@@ -172,8 +210,30 @@ systemConfig:
       final: /usr/local/sbin/first-boot-sample.sh
     - local: additionalfiles/debian13-bb-dracut/etc/systemd/system/first-boot-sample.service
       final: /etc/systemd/system/first-boot-sample.service
+    # UCC app source tree (c4v-0918), packaged as a single tarball since
+    # additionalFiles only supports one file -> one destination (no
+    # recursive directory staging). The "-patched" suffix marks that this is
+    # NOT the raw BB team drop: it has the chroot-safety fixes applied to
+    # scripts/install-debian.sh (see the configurations comment below).
+    # Hardcoded absolute local path for now — BB team is refactoring their
+    # build into a separate download phase that will publish this as a
+    # proper artifact; until that lands, update `local:` below to wherever
+    # your patched copy lives on your build machine. The tarball's internal
+    # top-level directory is named "c4v" (not "c4v-0918"), hence /opt/c4v/c4v
+    # below.
+    - local: /home/repos/c4v-0918-patched.tar.gz
+      final: /opt/c4v/c4v-0918-patched.tar.gz
 
   configurations:
+    # Stage the UCC app tree from the tarball above, then run its installer.
+    # install-debian.sh now owns: OVMF staging, swagger-ui download, the ucc
+    # Python venv, the Xorg pageflip config, the xhost Xsession script, the
+    # GRUB timeout drop-in, and the usb2qemu/drm2qemu udev rules + dracut
+    # include — all previously duplicated here by hand. It's been patched
+    # for chroot use (add_gnome_keyboard_shortcuts and the trailing
+    # update-grub removed — see install-debian.sh's own comments for why).
+    - cmd: 'mkdir -p /opt/c4v && tar xzf /opt/c4v/c4v-0918-patched.tar.gz -C /opt/c4v'
+    - cmd: 'cd /opt/c4v/c4v && bash scripts/install-debian.sh'
     - cmd: 'mkdir -p /etc/dracut.conf.d && echo ''add_dracutmodules+=" hello "'' > /etc/dracut.conf.d/91hello.conf'
     - cmd: "chmod 755 /usr/lib/dracut/modules.d/91hello/module-setup.sh /usr/lib/dracut/modules.d/91hello/hello.sh /usr/lib/dracut/modules.d/91hello/initqueue-sample.sh"
     - cmd: "printf 'Package: systemd-boot systemd-boot-efi\\nPin: release *\\nPin-Priority: -1\\n' > /etc/apt/preferences.d/no-systemd-boot"

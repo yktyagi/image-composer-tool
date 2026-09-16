@@ -1,0 +1,37 @@
+# GNOME custom keyboard shortcuts for the UCC VM-control workflow.
+# Compiled into the system dconf db by dconf-update-mutter.service (same
+# mechanism as 00-mutter), via the user-db:user/system-db:local profile in
+# ../../profile/user.
+#
+# NOTE: these bindings invoke /ucc/app/vmsetup/vmsetup and
+# /ucc/app/keyboard-shortcut.sh, which this template does not stage (the UCC
+# application tree is a separate, not-yet-templated build artifact — see the
+# debian13-x86_64-bb-dracut-raw.yml discussion). Until that tree is staged,
+# pressing these shortcuts will fail with "command not found".
+[org/gnome/settings-daemon/plugins/media-keys]
+custom-keybindings=['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom2/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom3/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom4/']
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0]
+name='Start VMControl'
+command='gnome-terminal -- sudo /ucc/app/vmsetup/vmsetup'
+binding='<Alt><Ctrl>v'
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1]
+name='Start VM 1'
+command='gnome-terminal -- bash /ucc/app/keyboard-shortcut.sh 1'
+binding='<Shift><Super>1'
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom2]
+name='Start VM 2'
+command='gnome-terminal -- bash /ucc/app/keyboard-shortcut.sh 2'
+binding='<Shift><Super>2'
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom3]
+name='Start VM 3'
+command='gnome-terminal -- bash /ucc/app/keyboard-shortcut.sh 3'
+binding='<Shift><Super>3'
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom4]
+name='Start VM 4'
+command='gnome-terminal -- bash /ucc/app/keyboard-shortcut.sh 4'
+binding='<Shift><Super>4'
